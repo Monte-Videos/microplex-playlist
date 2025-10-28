@@ -43,7 +43,7 @@
   <h2>OBS Playlist POC</h2>
   <div>
     <label>OBS WebSocket URL:<br>
-      <input type="text" id="wsUrl" value="ws://localhost:4455" style="width: 100%;">
+      <input type="text" id="wsUrl" value="ws://the-microplex:4455" style="width: 100%;">
     </label>
     <button id="connectBtn">Connect</button>
     <span id="connStatus">Not connected</span>
@@ -82,27 +82,46 @@
     let requestCounter = 1;
     let poller = null;
     let scheduleTimeout = null;
+    let isStreaming = false;
+
+    function updateStreamButton() {
+      const btn = document.getElementById('streamBtn');
+      if (!btn) return;
+      btn.textContent = isStreaming ? 'Stop Streaming' : 'Start Streaming';
+    }
 
     // --- Persistence ---
-    function saveSettings() {
-      if (!window.mediaTools) return;
-      window.mediaTools.saveData('wsUrl', document.getElementById('wsUrl').value);
-      window.mediaTools.saveData('mediaSource', document.getElementById('mediaSource').value);
-      window.mediaTools.saveData('playlist', getPlaylistData());
-      window.mediaTools.saveData('scheduleTime', document.getElementById('scheduleTime').value);
+    async function saveSettings() {
+      if (!window.mediaTools || typeof window.mediaTools.saveData !== 'function') return;
+      const wsUrl = document.getElementById('wsUrl').value;
+      const mediaSourceValue = document.getElementById('mediaSource').value;
+      const playlistData = getPlaylistData();
+      const scheduleTimeValue = document.getElementById('scheduleTime').value;
+      await Promise.allSettled([
+        window.mediaTools.saveData('wsUrl', wsUrl),
+        window.mediaTools.saveData('mediaSource', mediaSourceValue),
+        window.mediaTools.saveData('playlist', playlistData),
+        window.mediaTools.saveData('scheduleTime', scheduleTimeValue)
+      ]);
     }
-    function loadSettings() {
-      if (!window.mediaTools) return;
-      const wsUrl = window.mediaTools.loadData('wsUrl');
+    async function loadSettings() {
+      if (!window.mediaTools || typeof window.mediaTools.loadData !== 'function') return;
+      const [wsUrl, mediaSourceValue, playlistData, scheduleTime] = await Promise.all([
+        window.mediaTools.loadData('wsUrl'),
+        window.mediaTools.loadData('mediaSource'),
+        window.mediaTools.loadData('playlist'),
+        window.mediaTools.loadData('scheduleTime')
+      ]);
       if (wsUrl) document.getElementById('wsUrl').value = wsUrl;
-      const mediaSource = window.mediaTools.loadData('mediaSource');
-      if (mediaSource) document.getElementById('mediaSource').value = mediaSource;
-      const playlistData = window.mediaTools.loadData('playlist');
+      if (mediaSourceValue) document.getElementById('mediaSource').value = mediaSourceValue;
       if (playlistData && Array.isArray(playlistData)) {
         playlistList.innerHTML = '';
-        playlistData.forEach(item => addToPlaylist([item.path], item.duration));
+        for (const item of playlistData) {
+          if (!item || !item.path) continue;
+          await addToPlaylist([item.path], item.duration, { skipSave: true });
+        }
+        await saveSettings();
       }
-      const scheduleTime = window.mediaTools.loadData('scheduleTime');
       if (scheduleTime) document.getElementById('scheduleTime').value = scheduleTime;
     }
 
@@ -120,7 +139,7 @@
     function getPlaylistData() {
       return Array.from(document.querySelectorAll('#playlistList li')).map(li => ({
         path: li.dataset.path,
-        duration: li.dataset.duration
+        duration: li.dataset.duration === '' ? null : Number(li.dataset.duration)
       }));
     }
     function getPlaylist() {
@@ -129,21 +148,45 @@
     function getMediaSource() {
       return document.getElementById('mediaSource').value.trim();
     }
-    async function addToPlaylist(paths, durationOverride) {
+    async function getFileDuration(path) {
+      if (!window.mediaTools || typeof window.mediaTools.getDuration !== 'function') {
+        return null;
+      }
+      try {
+        return await window.mediaTools.getDuration(path);
+      } catch (err) {
+        console.warn('Failed to get duration for', path, err);
+        return null;
+      }
+    }
+    async function addToPlaylist(paths, durationOverride, options = {}) {
       const ul = document.getElementById('playlistList');
       for (const path of paths) {
         const cleaned = cleanPath(path);
         if (!cleaned) continue;
         const li = document.createElement('li');
-        let duration = durationOverride !== undefined ? durationOverride : await window.mediaTools.getDuration(cleaned);
-        li.textContent = cleaned + " (" + formatTime(duration) + ")";
+        let duration;
+        if (durationOverride !== undefined) {
+          duration = durationOverride == null ? null : Number(durationOverride);
+        } else {
+          duration = await getFileDuration(cleaned);
+        }
+        if (!Number.isFinite(duration)) duration = null;
+        const filename = cleaned.split(/[\\\/]/).pop();
+        const fileLabel = document.createElement('span');
+        fileLabel.className = 'file-name';
+        fileLabel.textContent = `${filename} (${formatTime(duration)})`;
+        li.appendChild(fileLabel);
         li.dataset.path = cleaned;
-        li.dataset.duration = duration || 0;
+        li.dataset.duration = duration != null ? duration : '';
+        li.title = cleaned;
         li.draggable = true;
         ul.appendChild(li);
       }
       updateStartEndTimes();
-      saveSettings();
+      if (!options.skipSave) {
+        await saveSettings();
+      }
     }
     function updateStartEndTimes() {
       // Get current time as start
@@ -159,7 +202,7 @@
         if (old) old.remove();
         let span = document.createElement('span');
         span.className = 'times';
-        span.textContent = `Start: ${formatTime(start)}  End: ${formatTime(end)}`;
+        span.textContent = ` Start: ${formatTime(start)}  End: ${formatTime(end)}`;
         li.appendChild(span);
         acc = end;
       });
@@ -227,9 +270,11 @@
     playlistList.addEventListener('drop', function(e) {
       e.preventDefault();
       playlistList.classList.remove('dragover');
-      const files = Array.from(e.dataTransfer.files);
-      const paths = files.map(file => file.path || file.name);
-      addToPlaylist(paths);
+      const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+      const paths = files.map(file => file.path || file.name).filter(Boolean);
+      if (paths.length) {
+        addToPlaylist(paths);
+      }
     });
 
     // --- OBS LOGIC ---
@@ -248,20 +293,32 @@
       }
       const url = document.getElementById('wsUrl').value;
       ws = new WebSocket(url);
-      ws.onopen = () => setConnStatus("Connected", "green");
-      ws.onclose = () => setConnStatus("Disconnected", "red");
+      ws.onopen = () => {
+        setConnStatus("Connected", "green");
+      };
+      ws.onclose = () => {
+        setConnStatus("Disconnected", "red");
+        isStreaming = false;
+        updateStreamButton();
+      };
       ws.onerror = (e) => setConnStatus("Error", "red");
       ws.onmessage = function(event) {
         const msg = JSON.parse(event.data);
         if (msg.op === 5 && msg.d && msg.d.eventType === "MediaInputPlaybackEnded") {
           const endedInput = msg.d.eventData.inputName;
           if (endedInput === mediaSource) playNext();
+        } else if (msg.op === 5 && msg.d && msg.d.eventType === "StreamStateChanged") {
+          const active = !!msg.d.eventData?.outputActive;
+          isStreaming = active;
+          updateStreamButton();
+        } else if (msg.op === 2) {
+          refreshStreamState();
         }
       };
       ws.addEventListener('open', function() {
         ws.send(JSON.stringify({
           "op": 1,
-          "d": { "rpcVersion": 1, "eventSubscriptions": (1 << 2) }
+          "d": { "rpcVersion": 1, "eventSubscriptions": ((1 << 2) | (1 << 3)) }
         }));
       });
     }
@@ -347,25 +404,52 @@
       playIndex(0);
     };
     // Start streaming button
+    function refreshStreamState() {
+      if (!ws || ws.readyState !== 1) return;
+      sendRequest("GetStreamStatus", {}, (data) => {
+        const active = !!data?.responseData?.outputActive;
+        isStreaming = active;
+        updateStreamButton();
+      });
+    }
+    updateStreamButton();
     document.getElementById('streamBtn').onclick = function() {
       if (!ws || ws.readyState !== 1) {
         setStatus("Not connected to OBS WebSocket.");
         return;
       }
-      sendRequest("StartStream", {}, (data) => {
-        setStatus("Streaming started!");
+      const requestType = isStreaming ? "StopStream" : "StartStream";
+      sendRequest(requestType, {}, (data) => {
+        const succeeded = data?.requestStatus?.result === true;
+        if (succeeded) {
+          isStreaming = !isStreaming;
+          updateStreamButton();
+          setStatus(isStreaming ? "Streaming started!" : "Streaming stopped.");
+        } else {
+          setStatus("Failed to toggle streaming.");
+        }
       });
     };
     // File picker logic
     const fileInput = document.getElementById('fileInput');
     document.getElementById('addFileBtn').onclick = function() {
-      fileInput.value = '';
-      fileInput.click();
+      if (window.mediaTools && typeof window.mediaTools.selectFiles === 'function') {
+        window.mediaTools.selectFiles().then(paths => {
+          if (Array.isArray(paths) && paths.length) {
+            addToPlaylist(paths);
+          }
+        });
+      } else {
+        fileInput.value = '';
+        fileInput.click();
+      }
     };
     fileInput.onchange = function(e) {
       const files = Array.from(fileInput.files);
-      const paths = files.map(file => file.path || file.name);
-      addToPlaylist(paths);
+      const paths = files.map(file => file.path || file.name).filter(Boolean);
+      if (paths.length) {
+        addToPlaylist(paths);
+      }
     };
 
     // --- Scheduling ---
