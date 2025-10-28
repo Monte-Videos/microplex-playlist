@@ -538,6 +538,7 @@
     }
 
     async function extractPathsFromDataTransfer(dt) {
+      if (!dt) return [];
       const results = new Set();
       const addPath = raw => {
         const normalized = normalizePath(raw);
@@ -545,6 +546,17 @@
           results.add(normalized);
         }
       };
+
+      const fileList = dt.files ? Array.from(dt.files) : [];
+      fileList.forEach(file => {
+        if (file && file.path) {
+          addPath(file.path);
+        }
+      });
+      if (results.size) {
+        return Array.from(results);
+      }
+
       const addFromUriList = text => {
         if (!text) return;
         text.split(/\r?\n/).forEach(line => {
@@ -563,15 +575,9 @@
           }
         });
       };
-      if (dt && dt.files) {
-        Array.from(dt.files).forEach(file => {
-          if (file && file.path) {
-            addPath(file.path);
-          }
-        });
-      }
+
       const stringItemPromises = [];
-      if (dt && dt.items) {
+      if (dt.items) {
         Array.from(dt.items).forEach(item => {
           if (!item) return;
           if (item.kind === 'file') {
@@ -590,6 +596,7 @@
           }
         });
       }
+
       if (dt && typeof dt.getData === 'function') {
         ['text/uri-list', 'public.file-url'].forEach(type => {
           try {
@@ -606,9 +613,11 @@
           }
         });
       }
+
       if (stringItemPromises.length) {
         await Promise.allSettled(stringItemPromises);
       }
+
       return Array.from(results);
     }
 
@@ -951,7 +960,8 @@
       }
       try {
         const duration = await window.mediaTools.getDuration(path);
-        return Number.isFinite(duration) ? duration : null;
+        const numericDuration = typeof duration === 'number' ? duration : Number(duration);
+        return Number.isFinite(numericDuration) ? numericDuration : null;
       } catch (err) {
         console.warn('Failed to get duration for', path, err);
         return null;
