@@ -384,6 +384,17 @@
       nodes.forEach(node => {
         node.classList.toggle('selected', selectedItemIds.has(node.dataset.itemId));
       });
+      if (!selectedItemIds.size) {
+        lastSelectedIndex = null;
+      } else if (changed || lastSelectedIndex == null) {
+        const ids = Array.from(selectedItemIds);
+        const lastId = ids[ids.length - 1];
+        const idx = nodes.findIndex(node => node.dataset.itemId === lastId);
+        lastSelectedIndex = idx === -1 ? null : idx;
+      }
+      if (changed) {
+        updateSelectionStyles();
+      }
     }
 
     function pruneSelection() {
@@ -526,7 +537,7 @@
       return `${hours}:${minutes}:${seconds}`;
     }
 
-    function extractPathsFromDataTransfer(dt) {
+    async function extractPathsFromDataTransfer(dt) {
       const results = new Set();
       const addPath = raw => {
         const normalized = normalizePath(raw);
@@ -559,6 +570,7 @@
           }
         });
       }
+      const stringItemPromises = [];
       if (dt && dt.items) {
         Array.from(dt.items).forEach(item => {
           if (!item) return;
@@ -567,6 +579,14 @@
             if (file && file.path) {
               addPath(file.path);
             }
+          } else if (item.kind === 'string' && typeof item.getAsString === 'function') {
+            stringItemPromises.push(new Promise(resolve => {
+              item.getAsString(text => {
+                addFromUriList(text);
+                addFromPlainText(text);
+                resolve();
+              });
+            }));
           }
         });
       }
@@ -585,6 +605,9 @@
             // ignore unsupported type
           }
         });
+      }
+      if (stringItemPromises.length) {
+        await Promise.allSettled(stringItemPromises);
       }
       return Array.from(results);
     }
@@ -805,6 +828,54 @@
         }
       }
       return total;
+    }
+
+    function reanchorTimelineToIndex(idx) {
+      const active = getActivePlaylist();
+      if (!active) return false;
+      if (idx < 0 || idx >= active.items.length) return false;
+      const item = active.items[idx];
+      playing = true;
+      playingItemId = item.id;
+      currentIndex = idx;
+      const elapsedBefore = getElapsedDurationBeforeIndex(idx);
+      timelineAnchor = new Date(Date.now() - elapsedBefore * 1000);
+      updateStartEndTimes();
+      updatePlayingIndicator();
+      setStatus(`Playing: ${item.path}`);
+      return true;
+    }
+
+    function handleMediaPlaybackStarted(eventData) {
+      const rawInputName = eventData?.inputName;
+      const inputName = typeof rawInputName === 'string' ? rawInputName.trim() : '';
+      if (!inputName) return;
+      const targetSource = getMediaSource();
+      const normalizedTarget = typeof targetSource === 'string' ? targetSource.trim() : '';
+      if (!normalizedTarget || inputName !== normalizedTarget) return;
+      sendRequest('GetMediaInputStatus', { inputName }, data => {
+        const response = data?.responseData || {};
+        const candidates = [response.mediaPath, response.mediaFilename, response.mediaPathName, response.mediaFile];
+        const rawPath = candidates.find(value => typeof value === 'string' && value.trim().length);
+        if (rawPath) {
+          const normalized = normalizePath(rawPath);
+          if (isLikelyFilePath(normalized)) {
+            const active = getActivePlaylist();
+            if (active) {
+              const matchIndex = active.items.findIndex(item => normalizePath(item.path || '') === normalized);
+              if (matchIndex !== -1) {
+                reanchorTimelineToIndex(matchIndex);
+                startPolling();
+                return;
+              }
+            }
+          }
+        }
+        timelineAnchor = new Date();
+        updateStartEndTimes();
+        updatePlayingIndicator();
+        startPolling();
+      });
     }
 
     function recomputeCurrentIndex() {
@@ -1083,6 +1154,8 @@
             if (endedInput === getMediaSource()) {
               playNext();
             }
+          } else if (msg.d.eventType === 'MediaInputPlaybackStarted') {
+            handleMediaPlaybackStarted(msg.d.eventData);
           } else if (msg.d.eventType === 'StreamStateChanged') {
             isStreaming = !!msg.d.eventData?.outputActive;
             updateStreamButton();
@@ -1152,16 +1225,15 @@
         updateStartEndTimes();
         return;
       }
-      currentIndex = idx;
       const item = active.items[idx];
       if (!item) {
         playNext();
         return;
       }
-      const elapsedBefore = getElapsedDurationBeforeIndex(idx);
-      timelineAnchor = new Date(Date.now() - elapsedBefore * 1000);
-      updateStartEndTimes();
-      playingItemId = item.id;
+      if (!reanchorTimelineToIndex(idx)) {
+        playNext();
+        return;
+      }
       const file = item.path;
       const mediaSourceName = getMediaSource();
       active.mediaSource = mediaSourceName;
@@ -1305,7 +1377,7 @@
       e.stopPropagation();
       playlistList.classList.remove('dragover');
       try {
-        const paths = extractPathsFromDataTransfer(e.dataTransfer);
+        const paths = await extractPathsFromDataTransfer(e.dataTransfer);
         if (paths.length) {
           await appendPathsToActivePlaylist(paths);
         }
@@ -1347,7 +1419,7 @@
         moveSelectionToTargetNode(null);
         return;
       }
-      const paths = extractPathsFromDataTransfer(e.dataTransfer);
+      const paths = await extractPathsFromDataTransfer(e.dataTransfer);
       if (paths.length) {
         await appendPathsToActivePlaylist(paths);
       }
