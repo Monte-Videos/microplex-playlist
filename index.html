@@ -549,8 +549,11 @@
 
       const fileList = dt.files ? Array.from(dt.files) : [];
       fileList.forEach(file => {
-        if (file && file.path) {
+        if (!file) return;
+        if (file.path) {
           addPath(file.path);
+        } else if (file.name) {
+          addPath(file.name);
         }
       });
       if (results.size) {
@@ -575,6 +578,24 @@
           }
         });
       };
+      const addFromNsFilenames = text => {
+        if (!text) return;
+        try {
+          const parsed = JSON.parse(text);
+          if (Array.isArray(parsed)) {
+            parsed.forEach(addPath);
+            return;
+          }
+        } catch (err) {
+          // fall through to line-based parsing
+        }
+        text.split(/\r?\n/).forEach(line => {
+          const trimmed = line.trim().replace(/^\(|\)|,$/g, '');
+          if (!trimmed) return;
+          const unquoted = trimmed.replace(/^['\"]+|['\"]+$/g, '');
+          addPath(unquoted);
+        });
+      };
 
       const stringItemPromises = [];
       if (dt.items) {
@@ -582,14 +603,19 @@
           if (!item) return;
           if (item.kind === 'file') {
             const file = typeof item.getAsFile === 'function' ? item.getAsFile() : null;
-            if (file && file.path) {
-              addPath(file.path);
+            if (file) {
+              if (file.path) {
+                addPath(file.path);
+              } else if (file.name) {
+                addPath(file.name);
+              }
             }
           } else if (item.kind === 'string' && typeof item.getAsString === 'function') {
             stringItemPromises.push(new Promise(resolve => {
               item.getAsString(text => {
                 addFromUriList(text);
                 addFromPlainText(text);
+                addFromNsFilenames(text);
                 resolve();
               });
             }));
@@ -598,7 +624,7 @@
       }
 
       if (dt && typeof dt.getData === 'function') {
-        ['text/uri-list', 'public.file-url'].forEach(type => {
+        ['text/uri-list', 'public.file-url', 'com.apple.pasteboard.promised-file-url'].forEach(type => {
           try {
             addFromUriList(dt.getData(type));
           } catch (err) {
@@ -608,6 +634,13 @@
         ['text/plain', 'public.utf8-plain-text'].forEach(type => {
           try {
             addFromPlainText(dt.getData(type));
+          } catch (err) {
+            // ignore unsupported type
+          }
+        });
+        ['NSFilenamesPboardType'].forEach(type => {
+          try {
+            addFromNsFilenames(dt.getData(type));
           } catch (err) {
             // ignore unsupported type
           }
