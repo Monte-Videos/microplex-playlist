@@ -212,6 +212,12 @@
       background: #e6f0ff;
       font-weight: 600;
     }
+    #playlistList li.selected {
+      background: #dbe6ff;
+    }
+    #playlistList li.selected.playing {
+      background: #c7d8ff;
+    }
     #playlistList.dragover { background: #f0f6ff; }
     .remove-tip { font-size: 11px; color: #8b91a4; }
     #status { font-size: 12px; color: #2f3240; min-height: 18px; }
@@ -246,7 +252,7 @@
           <div class="left">
             <button id="addFileBtn" class="secondary">Add File</button>
             <input type="file" id="fileInput" style="display:none;" multiple>
-            <span class="remove-tip">Drag files in, drag to reorder, double-click a row to remove.</span>
+            <span class="remove-tip">Drag files in, multi-select with Shift/Cmd to reorder together, double-click or press Delete to remove.</span>
           </div>
         </div>
         <div class="playlist-table">
@@ -261,6 +267,7 @@
       </section>
       <section class="controls">
         <button id="playBtn" class="primary">Play</button>
+        <button id="skipBtn" class="secondary">Skip</button>
         <button id="streamBtn" class="secondary">Start Streaming</button>
       </section>
       <section class="schedule">
@@ -283,8 +290,10 @@
     let currentIndex = 0;
     let playingItemId = null;
     let isRestoring = false;
-    let dragItemId = null;
     let timelineAnchor = null;
+    const selectedItemIds = new Set();
+    let lastSelectedIndex = null;
+    let dragSelectionIds = null;
 
     const playlists = [];
     let activePlaylistId = null;
@@ -359,6 +368,134 @@
       return (h > 0 ? `${h}:${minutes}` : `${minutes}`) + `:${String(s).padStart(2, '0')}`;
     }
 
+    function getPlaylistNodes() {
+      return Array.from(playlistList.children);
+    }
+
+    function updateSelectionStyles() {
+      const nodes = getPlaylistNodes();
+      nodes.forEach(node => {
+        node.classList.toggle('selected', selectedItemIds.has(node.dataset.itemId));
+      });
+    }
+
+    function pruneSelection() {
+      const nodes = getPlaylistNodes();
+      const existing = new Set(nodes.map(node => node.dataset.itemId));
+      let changed = false;
+      selectedItemIds.forEach(id => {
+        if (!existing.has(id)) {
+          selectedItemIds.delete(id);
+          changed = true;
+        }
+      });
+      if (!selectedItemIds.size) {
+        lastSelectedIndex = null;
+      } else if (changed || lastSelectedIndex == null) {
+        const ids = Array.from(selectedItemIds);
+        const lastId = ids[ids.length - 1];
+        const idx = nodes.findIndex(node => node.dataset.itemId === lastId);
+        lastSelectedIndex = idx === -1 ? null : idx;
+      }
+      if (changed) {
+        updateSelectionStyles();
+      }
+    }
+
+    function clearSelection() {
+      if (!selectedItemIds.size) return;
+      selectedItemIds.clear();
+      lastSelectedIndex = null;
+      updateSelectionStyles();
+    }
+
+    function getSelectedNodesInOrder() {
+      const nodes = getPlaylistNodes();
+      return nodes.filter(node => selectedItemIds.has(node.dataset.itemId));
+    }
+
+    function getDraggingNodes() {
+      if (!dragSelectionIds || !dragSelectionIds.length) return [];
+      const idSet = new Set(dragSelectionIds);
+      return getPlaylistNodes().filter(node => idSet.has(node.dataset.itemId));
+    }
+
+    function handleRowSelection(event, node) {
+      const nodes = getPlaylistNodes();
+      const index = nodes.indexOf(node);
+      const id = node.dataset.itemId;
+      if (!id || index === -1) return;
+      if (event.shiftKey && lastSelectedIndex != null) {
+        const start = Math.min(lastSelectedIndex, index);
+        const end = Math.max(lastSelectedIndex, index);
+        selectedItemIds.clear();
+        for (let i = start; i <= end; i += 1) {
+          const itemId = nodes[i]?.dataset.itemId;
+          if (itemId) selectedItemIds.add(itemId);
+        }
+      } else if (event.metaKey || event.ctrlKey) {
+        if (selectedItemIds.has(id)) {
+          selectedItemIds.delete(id);
+        } else {
+          selectedItemIds.add(id);
+        }
+      } else {
+        selectedItemIds.clear();
+        selectedItemIds.add(id);
+      }
+      updateSelectionStyles();
+      lastSelectedIndex = index;
+    }
+
+    function finalizeReorder() {
+      dragSelectionIds = null;
+      syncActivePlaylistFromDom();
+      pruneSelection();
+      updateSelectionStyles();
+      recomputeCurrentIndex();
+      updateStartEndTimes();
+      updatePlayingIndicator();
+      saveSettings();
+    }
+
+    function moveSelectionToIndex(targetIndex) {
+      if (!dragSelectionIds || !dragSelectionIds.length) return;
+      const nodes = getPlaylistNodes();
+      const movingNodes = getDraggingNodes();
+      if (!movingNodes.length) return;
+      const fragment = document.createDocumentFragment();
+      movingNodes.forEach(node => fragment.appendChild(node));
+      const filtered = nodes.filter(node => !movingNodes.includes(node));
+      const clampedIndex = Math.max(0, Math.min(targetIndex, filtered.length));
+      const refNode = filtered[clampedIndex] || null;
+      playlistList.insertBefore(fragment, refNode);
+      finalizeReorder();
+    }
+
+    function moveSelectionToTargetNode(targetNode) {
+      if (!dragSelectionIds || !dragSelectionIds.length) return;
+      if (!targetNode) {
+        moveSelectionToIndex(getPlaylistNodes().length);
+        return;
+      }
+      const nodes = getPlaylistNodes();
+      const movingNodes = getDraggingNodes();
+      if (!movingNodes.length) return;
+      if (movingNodes.includes(targetNode)) return;
+      const filtered = nodes.filter(node => !movingNodes.includes(node));
+      let insertIndex = filtered.indexOf(targetNode);
+      if (insertIndex === -1) {
+        insertIndex = filtered.length;
+      } else {
+        const originalIndex = nodes.indexOf(targetNode);
+        const firstMovingIndex = nodes.indexOf(movingNodes[0]);
+        if (firstMovingIndex < originalIndex) {
+          insertIndex += 1;
+        }
+      }
+      moveSelectionToIndex(insertIndex);
+    }
+
     function getScheduleStartDate() {
       const value = scheduleInput.value;
       if (!value) return null;
@@ -423,6 +560,18 @@
             const file = item.getAsFile();
             if (file && file.path) {
               addPath(file.path);
+            } else if (typeof item.webkitGetAsEntry === 'function') {
+              const entry = item.webkitGetAsEntry();
+              if (entry && entry.isFile && typeof entry.file === 'function') {
+                pending.push(new Promise(resolve => {
+                  entry.file(f => {
+                    if (f && f.path) {
+                      addPath(f.path);
+                    }
+                    resolve();
+                  }, () => resolve());
+                }));
+              }
             }
           } else if (item.kind === 'string' && typeof item.getAsString === 'function') {
             pending.push(new Promise(resolve => {
@@ -442,7 +591,17 @@
           // ignore unsupported type
         }
         try {
+          addFromUriList(dt.getData('public.file-url'));
+        } catch (err) {
+          // ignore unsupported type
+        }
+        try {
           addFromPlainText(dt.getData('text/plain'));
+        } catch (err) {
+          // ignore unsupported type
+        }
+        try {
+          addFromPlainText(dt.getData('public.utf8-plain-text'));
         } catch (err) {
           // ignore unsupported type
         }
@@ -500,6 +659,7 @@
     function activatePlaylist(id) {
       if (!id) return;
       activePlaylistId = id;
+      clearSelection();
       renderSidebar();
       timelineAnchor = getScheduleStartDate();
       renderActivePlaylist();
@@ -514,6 +674,7 @@
       li.dataset.duration = item.duration != null ? item.duration : '';
       li.title = item.path;
       li.draggable = true;
+      li.tabIndex = 0;
 
       const title = document.createElement('span');
       title.className = 'title';
@@ -549,28 +710,45 @@
         const row = createPlaylistRow(item);
         playlistList.appendChild(row);
       });
+      pruneSelection();
+      updateSelectionStyles();
       updateStartEndTimes();
       updatePlayingIndicator();
     }
 
     function attachRowHandlers(li) {
+      li.addEventListener('click', function(event) {
+        if (event.defaultPrevented) return;
+        handleRowSelection(event, li);
+      });
       li.addEventListener('dragstart', function(e) {
-        dragItemId = this.dataset.itemId;
+        if (!selectedItemIds.has(this.dataset.itemId) || e.shiftKey || e.metaKey || e.ctrlKey) {
+          handleRowSelection(e, this);
+        }
+        dragSelectionIds = Array.from(selectedItemIds);
         this.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
+        try {
+          e.dataTransfer.setData('text/plain', dragSelectionIds.join(','));
+        } catch (err) {
+          // ignore inability to set drag data
+        }
       });
       li.addEventListener('dragend', function() {
         this.classList.remove('dragging');
-        Array.from(playlistList.children).forEach(node => node.classList.remove('over'));
+        getPlaylistNodes().forEach(node => node.classList.remove('over'));
         playlistList.classList.remove('dragover');
-        dragItemId = null;
+        dragSelectionIds = null;
         updateStartEndTimes();
       });
       li.addEventListener('dragover', function(e) {
+        if (!dragSelectionIds || !dragSelectionIds.length) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
       });
       li.addEventListener('dragenter', function() {
+        if (!dragSelectionIds || !dragSelectionIds.length) return;
+        if (selectedItemIds.has(this.dataset.itemId)) return;
         this.classList.add('over');
       });
       li.addEventListener('dragleave', function() {
@@ -580,26 +758,14 @@
         e.preventDefault();
         this.classList.remove('over');
         playlistList.classList.remove('dragover');
-        if (!dragItemId) return;
-        const nodes = Array.from(playlistList.children);
-        const srcNode = nodes.find(node => node.dataset.itemId === dragItemId);
-        if (!srcNode || srcNode === this) return;
-        const srcIdx = nodes.indexOf(srcNode);
-        const tgtIdx = nodes.indexOf(this);
-        if (srcIdx < tgtIdx) {
-          playlistList.insertBefore(srcNode, this.nextSibling);
-        } else {
-          playlistList.insertBefore(srcNode, this);
-        }
-        syncActivePlaylistFromDom();
-        recomputeCurrentIndex();
-        updateStartEndTimes();
-        updatePlayingIndicator();
-        saveSettings();
-        dragItemId = null;
+        if (!dragSelectionIds || !dragSelectionIds.length) return;
+        moveSelectionToTargetNode(this);
       });
       li.addEventListener('dblclick', function() {
-        removeItemById(this.dataset.itemId);
+        const id = this.dataset.itemId;
+        if (id) {
+          removeItemsByIds([id]);
+        }
       });
     }
 
@@ -688,25 +854,47 @@
       }
     }
 
-    function removeItemById(itemId) {
+    function removeItemsByIds(ids) {
+      if (!Array.isArray(ids) || !ids.length) return;
       const active = getActivePlaylist();
       if (!active) return;
-      const index = active.items.findIndex(item => item.id === itemId);
-      if (index === -1) return;
-      const [removed] = active.items.splice(index, 1);
-      if (playing && removed && removed.id === playingItemId) {
-        playing = false;
-        playingItemId = null;
-        currentIndex = 0;
-        if (poller) clearInterval(poller);
-        setStatus('Playback stopped (item removed).');
-        const scheduleDate = getScheduleStartDate();
-        timelineAnchor = isValidDate(scheduleDate) ? scheduleDate : null;
-      } else if (playing && index < currentIndex) {
-        currentIndex = Math.max(0, currentIndex - 1);
+      const idSet = new Set(ids.filter(Boolean));
+      if (!idSet.size) return;
+      const originalItems = active.items.slice();
+      if (!originalItems.some(item => idSet.has(item.id))) return;
+      const playingRemoved = playing && idSet.has(playingItemId);
+      let removedBeforeCurrent = 0;
+      if (playing && !playingRemoved) {
+        for (let i = 0; i < Math.min(currentIndex, originalItems.length); i += 1) {
+          if (idSet.has(originalItems[i]?.id)) {
+            removedBeforeCurrent += 1;
+          }
+        }
+      }
+      active.items = originalItems.filter(item => !idSet.has(item.id));
+      idSet.forEach(id => selectedItemIds.delete(id));
+      if (!selectedItemIds.size) {
+        lastSelectedIndex = null;
+      }
+      if (playing) {
+        if (playingRemoved) {
+          playing = false;
+          playingItemId = null;
+          currentIndex = 0;
+          if (poller) clearInterval(poller);
+          setStatus('Playback stopped (item removed).');
+          const scheduleDate = getScheduleStartDate();
+          timelineAnchor = isValidDate(scheduleDate) ? scheduleDate : null;
+        } else if (removedBeforeCurrent > 0) {
+          currentIndex = Math.max(0, currentIndex - removedBeforeCurrent);
+        }
       }
       renderActivePlaylist();
       saveSettings();
+    }
+
+    function removeItemById(itemId) {
+      removeItemsByIds([itemId]);
     }
 
     async function getFileDuration(path) {
@@ -739,6 +927,8 @@
         addedIds.add(id);
       }
       if (!addedIds.size) return;
+      selectedItemIds.clear();
+      addedIds.forEach(id => selectedItemIds.add(id));
       renderActivePlaylist();
       await saveSettings();
       const refreshed = getActivePlaylist();
@@ -1037,6 +1227,27 @@
       playIndex(0);
     };
 
+    document.getElementById('skipBtn').onclick = () => {
+      const active = getActivePlaylist();
+      if (!active || !active.items.length) {
+        setStatus('Playlist is empty.');
+        return;
+      }
+      if (!playing) {
+        const activeIdx = active.items.findIndex(item => item.id === playingItemId);
+        const baseIndex = activeIdx !== -1 ? activeIdx : Math.max(-1, currentIndex - 1);
+        const targetIndex = baseIndex + 1;
+        if (targetIndex >= active.items.length) {
+          setStatus('Reached end of playlist.');
+          return;
+        }
+        playing = true;
+        playIndex(Math.max(0, targetIndex));
+        return;
+      }
+      playNext();
+    };
+
     updateStreamButton();
 
     document.getElementById('streamBtn').onclick = () => {
@@ -1100,16 +1311,19 @@
     };
 
     function handleGlobalDrag(e) {
+      if (dragSelectionIds && dragSelectionIds.length) return;
       e.preventDefault();
-      if (!dragItemId && e.dataTransfer) {
+      e.stopPropagation();
+      if (e.dataTransfer) {
         e.dataTransfer.dropEffect = 'copy';
       }
     }
 
     async function handleGlobalDrop(e) {
+      if (dragSelectionIds && dragSelectionIds.length) return;
       e.preventDefault();
+      e.stopPropagation();
       playlistList.classList.remove('dragover');
-      if (dragItemId) return;
       try {
         const paths = await extractPathsFromDataTransfer(e.dataTransfer);
         if (paths.length) {
@@ -1121,13 +1335,23 @@
     }
 
     ['dragenter', 'dragover'].forEach(eventName => {
+      window.addEventListener(eventName, handleGlobalDrag);
       document.addEventListener(eventName, handleGlobalDrag);
+      if (document.body) {
+        document.body.addEventListener(eventName, handleGlobalDrag);
+      }
     });
+    window.addEventListener('drop', handleGlobalDrop);
     document.addEventListener('drop', handleGlobalDrop);
+    if (document.body) {
+      document.body.addEventListener('drop', handleGlobalDrop);
+    }
 
     playlistList.addEventListener('dragover', e => {
       e.preventDefault();
-      if (!dragItemId && e.dataTransfer) {
+      if (dragSelectionIds && dragSelectionIds.length) {
+        e.dataTransfer.dropEffect = 'move';
+      } else if (e.dataTransfer) {
         e.dataTransfer.dropEffect = 'copy';
       }
       playlistList.classList.add('dragover');
@@ -1139,10 +1363,39 @@
       e.preventDefault();
       e.stopPropagation();
       playlistList.classList.remove('dragover');
+      if (dragSelectionIds && dragSelectionIds.length) {
+        moveSelectionToTargetNode(null);
+        return;
+      }
       const paths = await extractPathsFromDataTransfer(e.dataTransfer);
       if (paths.length) {
         await appendPathsToActivePlaylist(paths);
       }
+    });
+    playlistList.addEventListener('click', event => {
+      if (event.target === playlistList) {
+        clearSelection();
+      }
+    });
+
+    document.addEventListener('click', event => {
+      if (!playlistList.contains(event.target)) {
+        clearSelection();
+      }
+    });
+
+    document.addEventListener('keydown', event => {
+      if (event.defaultPrevented) return;
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+      const target = event.target;
+      if (!target) return;
+      const tagName = target.tagName;
+      if (tagName === 'INPUT' || tagName === 'TEXTAREA' || target.isContentEditable) {
+        return;
+      }
+      if (!selectedItemIds.size) return;
+      event.preventDefault();
+      removeItemsByIds(Array.from(selectedItemIds));
     });
 
     document.getElementById('newPlaylistBtn').onclick = () => {
