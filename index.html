@@ -384,6 +384,17 @@
       nodes.forEach(node => {
         node.classList.toggle('selected', selectedItemIds.has(node.dataset.itemId));
       });
+      if (!selectedItemIds.size) {
+        lastSelectedIndex = null;
+      } else if (changed || lastSelectedIndex == null) {
+        const ids = Array.from(selectedItemIds);
+        const lastId = ids[ids.length - 1];
+        const idx = nodes.findIndex(node => node.dataset.itemId === lastId);
+        lastSelectedIndex = idx === -1 ? null : idx;
+      }
+      if (changed) {
+        updateSelectionStyles();
+      }
     }
 
     function pruneSelection() {
