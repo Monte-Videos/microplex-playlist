@@ -284,6 +284,7 @@
     let playingItemId = null;
     let isRestoring = false;
     let dragItemId = null;
+    let timelineAnchor = null;
 
     const playlists = [];
     let activePlaylistId = null;
@@ -296,6 +297,10 @@
 
     function generateId(prefix) {
       return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    function isValidDate(value) {
+      return value instanceof Date && !Number.isNaN(value.getTime());
     }
 
     function getActivePlaylist() {
@@ -361,6 +366,14 @@
       return Number.isNaN(parsed.getTime()) ? null : parsed;
     }
 
+    function getTimelineStartDate() {
+      if (isValidDate(timelineAnchor)) {
+        return timelineAnchor;
+      }
+      const scheduleDate = getScheduleStartDate();
+      return isValidDate(scheduleDate) ? scheduleDate : null;
+    }
+
     function formatClock(date) {
       if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '--:--';
       const hours = String(date.getHours()).padStart(2, '0');
@@ -369,34 +382,73 @@
       return `${hours}:${minutes}:${seconds}`;
     }
 
-    function extractPathsFromDataTransfer(dt) {
+    async function extractPathsFromDataTransfer(dt) {
       const results = new Set();
+      const addPath = raw => {
+        const normalized = normalizePath(raw);
+        if (normalized) {
+          results.add(normalized);
+        }
+      };
+      const addFromUriList = text => {
+        if (!text) return;
+        text.split(/\r?\n/).forEach(line => {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) return;
+          addPath(trimmed);
+        });
+      };
+      const addFromPlainText = text => {
+        if (!text) return;
+        text.split(/\r?\n/).forEach(line => {
+          const trimmed = line.trim();
+          if (!trimmed) return;
+          if (/^file:\/\//i.test(trimmed) || trimmed.startsWith('/') || /^[A-Za-z]:/.test(trimmed)) {
+            addPath(trimmed);
+          }
+        });
+      };
       if (dt && dt.files) {
         for (const file of Array.from(dt.files)) {
-          if (file.path) {
-            results.add(normalizePath(file.path));
+          if (file && file.path) {
+            addPath(file.path);
+          }
+        }
+      }
+      const pending = [];
+      if (dt && dt.items) {
+        for (const item of Array.from(dt.items)) {
+          if (!item) continue;
+          if (item.kind === 'file') {
+            const file = item.getAsFile();
+            if (file && file.path) {
+              addPath(file.path);
+            }
+          } else if (item.kind === 'string' && typeof item.getAsString === 'function') {
+            pending.push(new Promise(resolve => {
+              item.getAsString(str => {
+                addFromUriList(str);
+                addFromPlainText(str);
+                resolve();
+              });
+            }));
           }
         }
       }
       if (dt && typeof dt.getData === 'function') {
-        const uriList = dt.getData('text/uri-list');
-        if (uriList) {
-          uriList.split(/\r?\n/).forEach(line => {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith('#')) return;
-            results.add(normalizePath(trimmed));
-          });
+        try {
+          addFromUriList(dt.getData('text/uri-list'));
+        } catch (err) {
+          // ignore unsupported type
         }
-        const plain = dt.getData('text/plain');
-        if (plain) {
-          plain.split(/\r?\n/).forEach(line => {
-            const trimmed = line.trim();
-            if (!trimmed) return;
-            if (/^file:\/\//i.test(trimmed)) {
-              results.add(normalizePath(trimmed));
-            }
-          });
+        try {
+          addFromPlainText(dt.getData('text/plain'));
+        } catch (err) {
+          // ignore unsupported type
         }
+      }
+      if (pending.length) {
+        await Promise.allSettled(pending);
       }
       return Array.from(results).filter(Boolean);
     }
@@ -443,14 +495,13 @@
         });
         playlistSidebar.appendChild(li);
       });
-      updateStartEndTimes();
-      updatePlayingIndicator();
     }
 
     function activatePlaylist(id) {
       if (!id) return;
       activePlaylistId = id;
       renderSidebar();
+      timelineAnchor = getScheduleStartDate();
       renderActivePlaylist();
       const active = getActivePlaylist();
       mediaSourceInput.value = (active && active.mediaSource) ? active.mediaSource : (active ? active.name : '');
@@ -568,7 +619,7 @@
     }
 
     function updateStartEndTimes() {
-      const scheduleStart = getScheduleStartDate();
+      const scheduleStart = getTimelineStartDate();
       let acc = 0;
       Array.from(playlistList.children).forEach(node => {
         const duration = Number(node.dataset.duration);
@@ -597,6 +648,20 @@
       Array.from(playlistList.children).forEach(node => {
         node.classList.toggle('playing', playing && node.dataset.itemId === playingItemId);
       });
+    }
+
+    function getElapsedDurationBeforeIndex(idx) {
+      if (idx <= 0) return 0;
+      const active = getActivePlaylist();
+      if (!active) return 0;
+      let total = 0;
+      for (let i = 0; i < Math.min(idx, active.items.length); i += 1) {
+        const duration = Number(active.items[i]?.duration);
+        if (Number.isFinite(duration) && duration > 0) {
+          total += duration;
+        }
+      }
+      return total;
     }
 
     function recomputeCurrentIndex() {
@@ -635,6 +700,8 @@
         currentIndex = 0;
         if (poller) clearInterval(poller);
         setStatus('Playback stopped (item removed).');
+        const scheduleDate = getScheduleStartDate();
+        timelineAnchor = isValidDate(scheduleDate) ? scheduleDate : null;
       } else if (playing && index < currentIndex) {
         currentIndex = Math.max(0, currentIndex - 1);
       }
@@ -748,6 +815,7 @@
       if (!window.mediaTools || typeof window.mediaTools.loadData !== 'function') {
         ensureDefaultPlaylist();
         activatePlaylist(activePlaylistId);
+        timelineAnchor = getScheduleStartDate();
         updateStartEndTimes();
         return;
       }
@@ -762,6 +830,7 @@
       ]);
       if (wsUrl) wsUrlInput.value = wsUrl;
       if (scheduleTime) scheduleInput.value = scheduleTime;
+      timelineAnchor = getScheduleStartDate();
       playlists.length = 0;
       let convertedLegacy = false;
       if (Array.isArray(storedPlaylists) && storedPlaylists.length) {
@@ -908,10 +977,20 @@
         if (poller) clearInterval(poller);
         setStatus('Done!');
         updatePlayingIndicator();
+        const scheduleDate = getScheduleStartDate();
+        timelineAnchor = isValidDate(scheduleDate) ? scheduleDate : null;
+        updateStartEndTimes();
         return;
       }
       currentIndex = idx;
       const item = active.items[idx];
+      if (!item) {
+        playNext();
+        return;
+      }
+      const elapsedBefore = getElapsedDurationBeforeIndex(idx);
+      timelineAnchor = new Date(Date.now() - elapsedBefore * 1000);
+      updateStartEndTimes();
       playingItemId = item.id;
       const file = item.path;
       const mediaSourceName = getMediaSource();
@@ -1020,27 +1099,37 @@
       }
     };
 
-    window.addEventListener('dragover', e => {
+    function handleGlobalDrag(e) {
       e.preventDefault();
       if (!dragItemId && e.dataTransfer) {
         e.dataTransfer.dropEffect = 'copy';
       }
-    });
+    }
 
-    window.addEventListener('drop', e => {
+    async function handleGlobalDrop(e) {
       e.preventDefault();
       playlistList.classList.remove('dragover');
       if (dragItemId) return;
-      const paths = extractPathsFromDataTransfer(e.dataTransfer);
-      if (paths.length) {
-        appendPathsToActivePlaylist(paths).catch(err => {
-          console.warn('Failed to add dropped files', err);
-        });
+      try {
+        const paths = await extractPathsFromDataTransfer(e.dataTransfer);
+        if (paths.length) {
+          await appendPathsToActivePlaylist(paths);
+        }
+      } catch (err) {
+        console.warn('Failed to add dropped files', err);
       }
+    }
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+      document.addEventListener(eventName, handleGlobalDrag);
     });
+    document.addEventListener('drop', handleGlobalDrop);
 
     playlistList.addEventListener('dragover', e => {
       e.preventDefault();
+      if (!dragItemId && e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'copy';
+      }
       playlistList.classList.add('dragover');
     });
     playlistList.addEventListener('dragleave', () => {
@@ -1050,7 +1139,7 @@
       e.preventDefault();
       e.stopPropagation();
       playlistList.classList.remove('dragover');
-      const paths = extractPathsFromDataTransfer(e.dataTransfer);
+      const paths = await extractPathsFromDataTransfer(e.dataTransfer);
       if (paths.length) {
         await appendPathsToActivePlaylist(paths);
       }
@@ -1085,6 +1174,8 @@
     });
 
     scheduleInput.addEventListener('input', () => {
+      const scheduleDate = getScheduleStartDate();
+      timelineAnchor = isValidDate(scheduleDate) ? scheduleDate : null;
       updateStartEndTimes();
       saveSettings();
     });
