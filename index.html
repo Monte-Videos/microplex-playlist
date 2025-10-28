@@ -354,6 +354,21 @@
       return (h > 0 ? `${h}:${minutes}` : `${minutes}`) + `:${String(s).padStart(2, '0')}`;
     }
 
+    function getScheduleStartDate() {
+      const value = scheduleInput.value;
+      if (!value) return null;
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function formatClock(date) {
+      if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '--:--';
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      const seconds = String(date.getSeconds()).padStart(2, '0');
+      return `${hours}:${minutes}:${seconds}`;
+    }
+
     function extractPathsFromDataTransfer(dt) {
       const results = new Set();
       if (dt && dt.files) {
@@ -428,6 +443,8 @@
         });
         playlistSidebar.appendChild(li);
       });
+      updateStartEndTimes();
+      updatePlayingIndicator();
     }
 
     function activatePlaylist(id) {
@@ -551,12 +568,21 @@
     }
 
     function updateStartEndTimes() {
+      const scheduleStart = getScheduleStartDate();
       let acc = 0;
       Array.from(playlistList.children).forEach(node => {
         const duration = Number(node.dataset.duration);
         const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
-        const startText = formatTime(acc);
-        const endText = formatTime(acc + safeDuration);
+        const startSeconds = acc;
+        const endSeconds = acc + safeDuration;
+        let startText = formatTime(startSeconds);
+        let endText = formatTime(endSeconds);
+        if (scheduleStart) {
+          const startDate = new Date(scheduleStart.getTime() + startSeconds * 1000);
+          const endDate = new Date(scheduleStart.getTime() + endSeconds * 1000);
+          startText = formatClock(startDate);
+          endText = formatClock(endDate);
+        }
         const durationEl = node.querySelector('.duration');
         const startEl = node.querySelector('.start');
         const endEl = node.querySelector('.end');
@@ -632,34 +658,66 @@
     async function appendPathsToActivePlaylist(paths) {
       const active = getActivePlaylist();
       if (!active || !Array.isArray(paths) || !paths.length) return;
+      const addedIds = new Set();
       for (const raw of paths) {
         const cleaned = normalizePath(raw);
         if (!cleaned) continue;
-        let duration = await getFileDuration(cleaned);
-        if (!Number.isFinite(duration)) duration = null;
-        active.items.push({
-          id: generateId('item'),
+        const id = generateId('item');
+        const item = {
+          id,
           path: cleaned,
-          duration
-        });
+          duration: null
+        };
+        active.items.push(item);
+        addedIds.add(id);
       }
+      if (!addedIds.size) return;
       renderActivePlaylist();
-      updateStartEndTimes();
       await saveSettings();
+      const refreshed = getActivePlaylist();
+      if (refreshed) {
+        const itemsToPopulate = refreshed.items.filter(item => addedIds.has(item.id));
+        if (itemsToPopulate.length) {
+          populateDurationsForItems(itemsToPopulate).catch(err => {
+            console.warn('Failed to populate durations', err);
+          });
+        }
+      }
+    }
+
+    async function populateDurationsForItems(items) {
+      if (!Array.isArray(items) || !items.length) return;
+      let updatedData = false;
+      let updatedDom = false;
+      for (const item of items) {
+        if (!item || item.duration != null) continue;
+        const duration = await getFileDuration(item.path);
+        if (!Number.isFinite(duration)) continue;
+        item.duration = duration;
+        updatedData = true;
+        const node = playlistList.querySelector(`[data-item-id="${item.id}"]`);
+        if (node) {
+          node.dataset.duration = String(duration);
+          const durationEl = node.querySelector('.duration');
+          if (durationEl) {
+            durationEl.textContent = formatTime(duration);
+          }
+          updatedDom = true;
+        }
+      }
+      if (updatedDom) {
+        updateStartEndTimes();
+      }
+      if (updatedData) {
+        await saveSettings();
+      }
     }
 
     async function refreshMissingDurations(playlist) {
       if (!playlist) return;
       const missing = playlist.items.filter(item => item.duration == null);
       if (!missing.length) return;
-      for (const item of missing) {
-        const duration = await getFileDuration(item.path);
-        if (Number.isFinite(duration)) {
-          item.duration = duration;
-        }
-      }
-      renderActivePlaylist();
-      await saveSettings();
+      await populateDurationsForItems(missing);
     }
 
     async function saveSettings() {
@@ -962,6 +1020,25 @@
       }
     };
 
+    window.addEventListener('dragover', e => {
+      e.preventDefault();
+      if (!dragItemId && e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    });
+
+    window.addEventListener('drop', e => {
+      e.preventDefault();
+      playlistList.classList.remove('dragover');
+      if (dragItemId) return;
+      const paths = extractPathsFromDataTransfer(e.dataTransfer);
+      if (paths.length) {
+        appendPathsToActivePlaylist(paths).catch(err => {
+          console.warn('Failed to add dropped files', err);
+        });
+      }
+    });
+
     playlistList.addEventListener('dragover', e => {
       e.preventDefault();
       playlistList.classList.add('dragover');
@@ -971,6 +1048,7 @@
     });
     playlistList.addEventListener('drop', async e => {
       e.preventDefault();
+      e.stopPropagation();
       playlistList.classList.remove('dragover');
       const paths = extractPathsFromDataTransfer(e.dataTransfer);
       if (paths.length) {
@@ -1007,6 +1085,7 @@
     });
 
     scheduleInput.addEventListener('input', () => {
+      updateStartEndTimes();
       saveSettings();
     });
 
