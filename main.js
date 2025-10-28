@@ -6,11 +6,10 @@ function createWindow () {
     width: 700,
     height: 700,
     webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js')
     }
   });
-
   win.loadFile('index.html');
 }
 
