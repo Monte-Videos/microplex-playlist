@@ -43,7 +43,7 @@
   <h2>OBS Playlist POC</h2>
   <div>
     <label>OBS WebSocket URL:<br>
-      <input type="text" id="wsUrl" value="ws://localhost:4455" style="width: 100%;">
+      <input type="text" id="wsUrl" value="ws://the-microplex:4455" style="width: 100%;">
     </label>
     <button id="connectBtn">Connect</button>
     <span id="connStatus">Not connected</span>
@@ -82,6 +82,13 @@
     let requestCounter = 1;
     let poller = null;
     let scheduleTimeout = null;
+    let isStreaming = false;
+
+    function updateStreamButton() {
+      const btn = document.getElementById('streamBtn');
+      if (!btn) return;
+      btn.textContent = isStreaming ? 'Stop Streaming' : 'Start Streaming';
+    }
 
     // --- Persistence ---
     async function saveSettings() {
@@ -165,9 +172,14 @@
           duration = await getFileDuration(cleaned);
         }
         if (!Number.isFinite(duration)) duration = null;
-        li.textContent = cleaned + " (" + formatTime(duration) + ")";
+        const filename = cleaned.split(/[\\\/]/).pop();
+        const fileLabel = document.createElement('span');
+        fileLabel.className = 'file-name';
+        fileLabel.textContent = `${filename} (${formatTime(duration)})`;
+        li.appendChild(fileLabel);
         li.dataset.path = cleaned;
         li.dataset.duration = duration != null ? duration : '';
+        li.title = cleaned;
         li.draggable = true;
         ul.appendChild(li);
       }
@@ -190,7 +202,7 @@
         if (old) old.remove();
         let span = document.createElement('span');
         span.className = 'times';
-        span.textContent = `Start: ${formatTime(start)}  End: ${formatTime(end)}`;
+        span.textContent = ` Start: ${formatTime(start)}  End: ${formatTime(end)}`;
         li.appendChild(span);
         acc = end;
       });
@@ -281,20 +293,32 @@
       }
       const url = document.getElementById('wsUrl').value;
       ws = new WebSocket(url);
-      ws.onopen = () => setConnStatus("Connected", "green");
-      ws.onclose = () => setConnStatus("Disconnected", "red");
+      ws.onopen = () => {
+        setConnStatus("Connected", "green");
+      };
+      ws.onclose = () => {
+        setConnStatus("Disconnected", "red");
+        isStreaming = false;
+        updateStreamButton();
+      };
       ws.onerror = (e) => setConnStatus("Error", "red");
       ws.onmessage = function(event) {
         const msg = JSON.parse(event.data);
         if (msg.op === 5 && msg.d && msg.d.eventType === "MediaInputPlaybackEnded") {
           const endedInput = msg.d.eventData.inputName;
           if (endedInput === mediaSource) playNext();
+        } else if (msg.op === 5 && msg.d && msg.d.eventType === "StreamStateChanged") {
+          const active = !!msg.d.eventData?.outputActive;
+          isStreaming = active;
+          updateStreamButton();
+        } else if (msg.op === 2) {
+          refreshStreamState();
         }
       };
       ws.addEventListener('open', function() {
         ws.send(JSON.stringify({
           "op": 1,
-          "d": { "rpcVersion": 1, "eventSubscriptions": (1 << 2) }
+          "d": { "rpcVersion": 1, "eventSubscriptions": ((1 << 2) | (1 << 3)) }
         }));
       });
     }
@@ -380,13 +404,30 @@
       playIndex(0);
     };
     // Start streaming button
+    function refreshStreamState() {
+      if (!ws || ws.readyState !== 1) return;
+      sendRequest("GetStreamStatus", {}, (data) => {
+        const active = !!data?.responseData?.outputActive;
+        isStreaming = active;
+        updateStreamButton();
+      });
+    }
+    updateStreamButton();
     document.getElementById('streamBtn').onclick = function() {
       if (!ws || ws.readyState !== 1) {
         setStatus("Not connected to OBS WebSocket.");
         return;
       }
-      sendRequest("StartStream", {}, (data) => {
-        setStatus("Streaming started!");
+      const requestType = isStreaming ? "StopStream" : "StartStream";
+      sendRequest(requestType, {}, (data) => {
+        const succeeded = data?.requestStatus?.result === true;
+        if (succeeded) {
+          isStreaming = !isStreaming;
+          updateStreamButton();
+          setStatus(isStreaming ? "Streaming started!" : "Streaming stopped.");
+        } else {
+          setStatus("Failed to toggle streaming.");
+        }
       });
     };
     // File picker logic
