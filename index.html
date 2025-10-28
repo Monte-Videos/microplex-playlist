@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>OBS Playlist POC</title>
+  <style>
+    body { font-family: sans-serif; margin: 2em; }
+    #playlistList { 
+      width: 100%; 
+      min-height: 120px; 
+      border: 1px solid #ccc; 
+      margin-bottom: 0.5em; 
+      padding: 0; 
+      list-style: none; 
+      background: #f9f9f9;
+      transition: background 0.2s;
+    }
+    #playlistList.dragover {
+      background: #d0eaff;
+    }
+    #playlistList li { 
+      padding: 0.5em; 
+      cursor: grab; 
+      border-bottom: 1px solid #ddd; 
+      background: #fff;
+      user-select: none;
+    }
+    #playlistList li.dragging {
+      opacity: 0.5;
+      background: #e0e0e0;
+    }
+    #playlistList li.over {
+      border-top: 2px solid #0074d9;
+    }
+    input, button { margin: 0.5em 0; }
+    #status { margin-top: 1em; }
+    #connStatus { font-weight: bold; }
+    .remove-tip { font-size: 0.9em; color: #888; }
+  </style>
+</head>
+<body>
+  <h2>OBS Playlist POC</h2>
+  <div>
+    <label>OBS WebSocket URL:<br>
+      <input type="text" id="wsUrl" value="ws://localhost:4455" style="width: 100%;">
+    </label>
+    <button id="connectBtn">Connect</button>
+    <span id="connStatus">Not connected</span>
+  </div>
+  <div>
+    <label>Media Source Name:<br>
+      <input type="text" id="mediaSource" value="MyMedia" style="width: 100%;">
+    </label>
+  </div>
+  <div>
+    <label>Media File Playlist:<br>
+      <ul id="playlistList"></ul>
+      <span class="remove-tip">(Drag files in, drag to reorder, double-click to remove.)</span>
+    </label>
+    <button id="addFileBtn">Add File</button>
+    <input type="file" id="fileInput" style="display:none;" multiple>
+  </div>
+  <button id="playBtn">Play</button>
+  <div id="status"></div>
+
+  <script>
+    let ws = null;
+    let playlist = [];
+    let currentIndex = 0;
+    let playing = false;
+    let mediaSource = "MyMedia";
+    let requestCounter = 1;
+    let poller = null;
+
+    // --- PLAYLIST LOGIC ---
+
+    function cleanPath(path) {
+      return path.replace(/^['"]+|['"]+$/g, '').trim();
+    }
+
+    function getPlaylist() {
+      return Array.from(document.querySelectorAll('#playlistList li')).map(li => cleanPath(li.dataset.path || li.textContent));
+    }
+
+    function getMediaSource() {
+      return document.getElementById('mediaSource').value.trim();
+    }
+
+    function addToPlaylist(paths) {
+      const ul = document.getElementById('playlistList');
+      paths.forEach(path => {
+        const cleaned = cleanPath(path);
+        if (!cleaned) return;
+        const li = document.createElement('li');
+        li.textContent = cleaned;
+        li.dataset.path = cleaned;
+        li.draggable = true;
+        ul.appendChild(li);
+      });
+    }
+
+    // Drag-and-drop reordering logic
+    let dragSrcEl = null;
+    function handleDragStart(e) {
+      dragSrcEl = this;
+      this.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    }
+    function handleDragEnd(e) {
+      this.classList.remove('dragging');
+      document.querySelectorAll('#playlistList li').forEach(li => li.classList.remove('over'));
+    }
+    function handleDragOver(e) { e.preventDefault(); return false; }
+    function handleDragEnter(e) { this.classList.add('over'); }
+    function handleDragLeave(e) { this.classList.remove('over'); }
+    function handleDrop(e) {
+      e.stopPropagation();
+      if (dragSrcEl !== this) {
+        const ul = document.getElementById('playlistList');
+        const nodes = Array.from(ul.children);
+        const srcIdx = nodes.indexOf(dragSrcEl);
+        const tgtIdx = nodes.indexOf(this);
+        if (srcIdx < tgtIdx) {
+          ul.insertBefore(dragSrcEl, this.nextSibling);
+        } else {
+          ul.insertBefore(dragSrcEl, this);
+        }
+      }
+      return false;
+    }
+    function attachDragHandlers(li) {
+      li.addEventListener('dragstart', handleDragStart);
+      li.addEventListener('dragend', handleDragEnd);
+      li.addEventListener('dragover', handleDragOver);
+      li.addEventListener('dragenter', handleDragEnter);
+      li.addEventListener('dragleave', handleDragLeave);
+      li.addEventListener('drop', handleDrop);
+      li.addEventListener('dblclick', function() { li.remove(); });
+    }
+    // Observe for new <li> and attach drag handlers
+    const playlistList = document.getElementById('playlistList');
+    const observer = new MutationObserver(function(mutations) {
+      mutations.forEach(m => {
+        m.addedNodes.forEach(node => {
+          if (node.nodeName === 'LI') attachDragHandlers(node);
+        });
+      });
+    });
+    observer.observe(playlistList, { childList: true });
+
+    // Drag-and-drop files from desktop
+    playlistList.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      playlistList.classList.add('dragover');
+    });
+    playlistList.addEventListener('dragleave', function(e) {
+      playlistList.classList.remove('dragover');
+    });
+    playlistList.addEventListener('drop', function(e) {
+      e.preventDefault();
+      playlistList.classList.remove('dragover');
+      const files = Array.from(e.dataTransfer.files);
+      const paths = files.map(file => file.path || file.name);
+      addToPlaylist(paths);
+    });
+
+    // --- OBS LOGIC ---
+
+    function setStatus(msg) {
+      document.getElementById('status').textContent = msg;
+    }
+    function setConnStatus(msg, color='black') {
+      const el = document.getElementById('connStatus');
+      el.textContent = msg;
+      el.style.color = color;
+    }
+    function connect() {
+      if (ws && ws.readyState === 1) {
+        setConnStatus("Already connected", "green");
+        return;
+      }
+      const url = document.getElementById('wsUrl').value;
+      ws = new WebSocket(url);
+      ws.onopen = () => setConnStatus("Connected", "green");
+      ws.onclose = () => setConnStatus("Disconnected", "red");
+      ws.onerror = (e) => setConnStatus("Error", "red");
+      ws.onmessage = function(event) {
+        const msg = JSON.parse(event.data);
+        if (msg.op === 5 && msg.d && msg.d.eventType === "MediaInputPlaybackEnded") {
+          const endedInput = msg.d.eventData.inputName;
+          if (endedInput === mediaSource) playNext();
+        }
+      };
+      ws.addEventListener('open', function() {
+        ws.send(JSON.stringify({
+          "op": 1,
+          "d": { "rpcVersion": 1, "eventSubscriptions": (1 << 2) }
+        }));
+      });
+    }
+    function sendRequest(requestType, requestData, cb) {
+      if (!ws || ws.readyState !== 1) {
+        setStatus("Not connected to OBS WebSocket.");
+        return;
+      }
+      const requestId = "req-" + (requestCounter++);
+      const msg = { op: 6, d: { requestType, requestId, requestData } };
+      ws.send(JSON.stringify(msg));
+      if (cb) {
+        const handler = function(event) {
+          const resp = JSON.parse(event.data);
+          if (resp.op === 7 && resp.d.requestId === requestId) {
+            ws.removeEventListener('message', handler);
+            cb(resp.d);
+          }
+        };
+        ws.addEventListener('message', handler);
+      }
+    }
+    function playIndex(idx) {
+      playlist = getPlaylist();
+      mediaSource = getMediaSource();
+      if (poller) clearInterval(poller);
+      if (idx >= playlist.length) {
+        setStatus("Done!");
+        playing = false;
+        return;
+      }
+      currentIndex = idx;
+      const file = playlist[idx];
+      setStatus(`Playing: ${file}`);
+      sendRequest("SetInputSettings", {
+        inputName: mediaSource,
+        inputSettings: { local_file: file },
+        overlay: false
+      }, () => {
+        setTimeout(() => {
+          sendRequest("TriggerMediaInputAction", {
+            inputName: mediaSource,
+            mediaAction: "restart"
+          });
+          startPolling();
+        }, 200);
+      });
+    }
+    function playNext() {
+      if (poller) clearInterval(poller);
+      playIndex(currentIndex + 1);
+    }
+    function startPolling() {
+      if (poller) clearInterval(poller);
+      poller = setInterval(() => {
+        sendRequest("GetMediaInputStatus", {
+          inputName: getMediaSource()
+        }, (data) => {
+          if (!data || !data.responseData) return;
+          const s = data.responseData;
+          if (s.mediaState === "OBS_MEDIA_STATE_ENDED" || s.mediaState === "OBS_MEDIA_STATE_STOPPED") {
+            playNext();
+          } else if (typeof s.mediaDuration === "number" && typeof s.mediaCursor === "number") {
+            if (s.mediaDuration > 0 && (s.mediaDuration - s.mediaCursor) < 500) {
+              playNext();
+            }
+          }
+        });
+      }, 500);
+    }
+    document.getElementById('connectBtn').onclick = connect;
+    document.getElementById('playBtn').onclick = function() {
+      if (!ws || ws.readyState !== 1) {
+        setStatus("Not connected to OBS WebSocket.");
+        return;
+      }
+      playlist = getPlaylist();
+      if (playlist.length === 0) {
+        setStatus("Playlist is empty.");
+        return;
+      }
+      playing = true;
+      playIndex(0);
+    };
+    // File picker logic
+    const fileInput = document.getElementById('fileInput');
+    document.getElementById('addFileBtn').onclick = function() {
+      fileInput.value = '';
+      fileInput.click();
+    };
+    fileInput.onchange = function(e) {
+      const files = Array.from(fileInput.files);
+      const paths = files.map(file => file.path || file.name);
+      addToPlaylist(paths);
+    };
+  </script>
+</body>
+</html>
