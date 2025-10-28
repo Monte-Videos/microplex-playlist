@@ -4,277 +4,1217 @@
   <meta charset="UTF-8">
   <title>OBS Playlist POC</title>
   <style>
-    body { font-family: sans-serif; margin: 2em; }
-    #playlistList { 
-      width: 100%; 
-      min-height: 120px; 
-      border: 1px solid #ccc; 
-      margin-bottom: 0.5em; 
-      padding: 0; 
-      list-style: none; 
-      background: #f9f9f9;
-      transition: background 0.2s;
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+      background: #e6e8ed;
+      color: #242633;
+      height: 100vh;
     }
-    #playlistList.dragover {
-      background: #d0eaff;
+    #app {
+      display: flex;
+      height: 100%;
+      width: 100%;
     }
-    #playlistList li { 
-      padding: 0.5em; 
-      cursor: grab; 
-      border-bottom: 1px solid #ddd; 
+    .sidebar {
+      width: 220px;
+      background: #f5f6fa;
+      border-right: 1px solid #c9ccda;
+      display: flex;
+      flex-direction: column;
+    }
+    .sidebar header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid #d7d9e4;
+    }
+    .sidebar header h2 {
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin: 0;
+      color: #6b7083;
+    }
+    #newPlaylistBtn {
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      border: none;
+      background: #dfe5f6;
+      color: #2d4fba;
+      font-size: 18px;
+      line-height: 24px;
+      cursor: pointer;
+      padding: 0;
+    }
+    #newPlaylistBtn:hover { background: #d2dbf3; }
+    #playlistSidebar {
+      list-style: none;
+      margin: 0;
+      padding: 6px 0;
+      flex: 1;
+      overflow-y: auto;
+    }
+    #playlistSidebar li {
+      padding: 6px 16px;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      color: #2f3240;
+    }
+    #playlistSidebar li:hover { background: #e9efff; }
+    #playlistSidebar li.active {
+      background: #dce6ff;
+      font-weight: 600;
+      color: #1f3065;
+    }
+    #playlistSidebar li .count {
+      font-size: 11px;
+      color: #6f7487;
+      margin-left: 8px;
+    }
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 18px 22px;
+      gap: 16px;
+      overflow: hidden;
+    }
+    .connection,
+    .controls,
+    .schedule {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-size: 13px;
+    }
+    .connection label,
+    .media-source label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 13px;
+      color: #4b4e5c;
+    }
+    input[type="text"],
+    input[type="datetime-local"] {
+      border: 1px solid #c7cbd9;
+      border-radius: 4px;
+      padding: 6px 8px;
+      font-size: 13px;
+      min-width: 180px;
       background: #fff;
+      color: inherit;
+    }
+    button {
+      border: none;
+      border-radius: 4px;
+      padding: 6px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+    }
+    button.primary { background: #2f69ff; color: #fff; }
+    button.primary:hover { background: #1f56e5; }
+    button.secondary { background: #eef1f8; color: #303448; }
+    button.secondary:hover { background: #dfe4f0; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .media-source {
+      display: flex;
+      gap: 18px;
+      align-items: flex-end;
+      flex-wrap: wrap;
+    }
+    .playlist-section {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      gap: 8px;
+    }
+    .playlist-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #6f7487;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .playlist-toolbar .left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .playlist-table {
+      border: 1px solid #c9ccda;
+      border-radius: 6px;
+      background: #fff;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .playlist-header {
+      display: grid;
+      grid-template-columns: 1fr 80px 80px 80px;
+      padding: 6px 12px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #7c8090;
+      border-bottom: 1px solid #d7d9e4;
+    }
+    #playlistList {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      flex: 1;
+      overflow-y: auto;
+    }
+    #playlistList li {
+      display: grid;
+      grid-template-columns: 1fr 80px 80px 80px;
+      align-items: center;
+      padding: 4px 12px;
+      font-size: 12px;
+      border-bottom: 1px solid #eef1f7;
+      cursor: default;
       user-select: none;
+      background: #fff;
     }
-    #playlistList li.dragging {
-      opacity: 0.5;
-      background: #e0e0e0;
+    #playlistList li:last-child { border-bottom: none; }
+    #playlistList li.dragging { opacity: 0.6; }
+    #playlistList li.over { border-top: 2px solid #2f69ff; }
+    #playlistList li .title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
-    #playlistList li.over {
-      border-top: 2px solid #0074d9;
+    #playlistList li .duration,
+    #playlistList li .start,
+    #playlistList li .end {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      padding-left: 8px;
     }
-    input, button { margin: 0.5em 0; }
-    #status { margin-top: 1em; }
-    #connStatus { font-weight: bold; }
-    .remove-tip { font-size: 0.9em; color: #888; }
-    .times { font-size: 0.95em; color: #444; margin-left: 1em; }
+    #playlistList li.playing {
+      background: #e6f0ff;
+      font-weight: 600;
+    }
+    #playlistList li.selected {
+      background: #dbe6ff;
+    }
+    #playlistList li.selected.playing {
+      background: #c7d8ff;
+    }
+    #playlistList.dragover { background: #f0f6ff; }
+    .remove-tip { font-size: 11px; color: #8b91a4; }
+    #status { font-size: 12px; color: #2f3240; min-height: 18px; }
   </style>
 </head>
 <body>
-  <h2>OBS Playlist POC</h2>
-  <div>
-    <label>OBS WebSocket URL:<br>
-      <input type="text" id="wsUrl" value="ws://localhost:4455" style="width: 100%;">
-    </label>
-    <button id="connectBtn">Connect</button>
-    <span id="connStatus">Not connected</span>
+  <div id="app">
+    <aside class="sidebar">
+      <header>
+        <h2>Playlists</h2>
+        <button id="newPlaylistBtn" title="New playlist">+</button>
+      </header>
+      <ul id="playlistSidebar"></ul>
+    </aside>
+    <main class="main">
+      <section class="connection">
+        <label>
+          OBS WebSocket URL
+          <input type="text" id="wsUrl" value="ws://the-microplex:4455">
+        </label>
+        <button id="connectBtn" class="primary">Connect</button>
+        <span id="connStatus">Not connected</span>
+      </section>
+      <section class="media-source">
+        <label>
+          Media Source Name
+          <input type="text" id="mediaSource" placeholder="OBS source name">
+        </label>
+      </section>
+      <section class="playlist-section">
+        <div class="playlist-toolbar">
+          <div class="left">
+            <button id="addFileBtn" class="secondary">Add File</button>
+            <input type="file" id="fileInput" style="display:none;" multiple>
+            <span class="remove-tip">Drag files in, multi-select with Shift/Cmd to reorder together, double-click or press Delete to remove.</span>
+          </div>
+        </div>
+        <div class="playlist-table">
+          <div class="playlist-header">
+            <div>Title</div>
+            <div>Duration</div>
+            <div>Start</div>
+            <div>End</div>
+          </div>
+          <ul id="playlistList"></ul>
+        </div>
+      </section>
+      <section class="controls">
+        <button id="playBtn" class="primary">Play</button>
+        <button id="skipBtn" class="secondary">Skip</button>
+        <button id="streamBtn" class="secondary">Start Streaming</button>
+      </section>
+      <section class="schedule">
+        <label>Schedule Start
+          <input type="datetime-local" id="scheduleTime">
+        </label>
+        <button id="scheduleBtn" class="secondary">Schedule Start</button>
+      </section>
+      <div id="status"></div>
+    </main>
   </div>
-  <div>
-    <label>Media Source Name:<br>
-      <input type="text" id="mediaSource" value="MyMedia" style="width: 100%;">
-    </label>
-  </div>
-  <div>
-    <label>Media File Playlist:<br>
-      <ul id="playlistList"></ul>
-      <span class="remove-tip">(Drag files in, drag to reorder, double-click to remove.)</span>
-    </label>
-    <button id="addFileBtn">Add File</button>
-    <input type="file" id="fileInput" style="display:none;" multiple>
-  </div>
-  <div>
-    <button id="playBtn">Play</button>
-    <button id="streamBtn">Start Streaming</button>
-  </div>
-  <div>
-    <label>Schedule Start:
-      <input type="datetime-local" id="scheduleTime">
-      <button id="scheduleBtn">Schedule Start</button>
-    </label>
-  </div>
-  <div id="status"></div>
 
   <script>
     let ws = null;
-    let playlist = [];
-    let currentIndex = 0;
     let playing = false;
-    let mediaSource = "MyMedia";
-    let requestCounter = 1;
+    let isStreaming = false;
     let poller = null;
     let scheduleTimeout = null;
+    let requestCounter = 1;
+    let currentIndex = 0;
+    let playingItemId = null;
+    let isRestoring = false;
+    let timelineAnchor = null;
+    const selectedItemIds = new Set();
+    let lastSelectedIndex = null;
+    let dragSelectionIds = null;
 
-    // --- Persistence ---
-    function saveSettings() {
-      if (!window.mediaTools) return;
-      window.mediaTools.saveData('wsUrl', document.getElementById('wsUrl').value);
-      window.mediaTools.saveData('mediaSource', document.getElementById('mediaSource').value);
-      window.mediaTools.saveData('playlist', getPlaylistData());
-      window.mediaTools.saveData('scheduleTime', document.getElementById('scheduleTime').value);
+    const playlists = [];
+    let activePlaylistId = null;
+
+    const playlistList = document.getElementById('playlistList');
+    const playlistSidebar = document.getElementById('playlistSidebar');
+    const mediaSourceInput = document.getElementById('mediaSource');
+    const wsUrlInput = document.getElementById('wsUrl');
+    const scheduleInput = document.getElementById('scheduleTime');
+
+    function generateId(prefix) {
+      return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     }
-    function loadSettings() {
-      if (!window.mediaTools) return;
-      const wsUrl = window.mediaTools.loadData('wsUrl');
-      if (wsUrl) document.getElementById('wsUrl').value = wsUrl;
-      const mediaSource = window.mediaTools.loadData('mediaSource');
-      if (mediaSource) document.getElementById('mediaSource').value = mediaSource;
-      const playlistData = window.mediaTools.loadData('playlist');
-      if (playlistData && Array.isArray(playlistData)) {
-        playlistList.innerHTML = '';
-        playlistData.forEach(item => addToPlaylist([item.path], item.duration));
+
+    function isValidDate(value) {
+      return value instanceof Date && !Number.isNaN(value.getTime());
+    }
+
+    function getActivePlaylist() {
+      return playlists.find(pl => pl.id === activePlaylistId) || null;
+    }
+
+    function ensureDefaultPlaylist(name = 'Playlist 1') {
+      if (!playlists.length) {
+        playlists.push({
+          id: generateId('pl'),
+          name,
+          mediaSource: name,
+          items: []
+        });
       }
-      const scheduleTime = window.mediaTools.loadData('scheduleTime');
-      if (scheduleTime) document.getElementById('scheduleTime').value = scheduleTime;
+      if (!activePlaylistId && playlists.length) {
+        activePlaylistId = playlists[0].id;
+      }
     }
 
-    // --- Playlist + Duration + Start/End ---
-    function cleanPath(path) {
-      return path.replace(/^['\"]+|['\"]+$/g, '').trim();
+    function normalizePath(rawPath) {
+      if (!rawPath) return '';
+      let cleaned = rawPath.trim().replace(/^['\"]+|['\"]+$/g, '');
+      if (/^file:\/\//i.test(cleaned)) {
+        try {
+          const uri = new URL(cleaned);
+          let pathname = decodeURIComponent(uri.pathname || '');
+          if (/^\/[A-Za-z]:/.test(pathname)) {
+            pathname = pathname.slice(1);
+          }
+          cleaned = pathname || '';
+        } catch (err) {
+          cleaned = cleaned.replace(/^file:\/\//i, '');
+          cleaned = decodeURIComponent(cleaned);
+          if (!cleaned.startsWith('/') && !/^[A-Za-z]:/.test(cleaned)) {
+            cleaned = '/' + cleaned;
+          }
+        }
+      }
+      return cleaned;
     }
+
+    function isLikelyFilePath(path) {
+      if (!path) return false;
+      if (/^\\\\/.test(path)) return true;
+      if (/^[A-Za-z]:[\\/]/.test(path)) return true;
+      return path.startsWith('/');
+    }
+
+    function extractFilename(path) {
+      if (!path) return '';
+      const segments = path.split(/\\|\//);
+      return segments[segments.length - 1] || path;
+    }
+
     function formatTime(seconds) {
-      if (seconds == null || isNaN(seconds)) return '--:--';
-      let h = Math.floor(seconds / 3600);
-      let m = Math.floor((seconds % 3600) / 60);
-      let s = Math.floor(seconds % 60);
-      return (h > 0 ? h + ':' : '') + (m < 10 && h > 0 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+      if (seconds == null || isNaN(seconds) || seconds < 0) return '--:--';
+      const total = Math.floor(seconds);
+      const h = Math.floor(total / 3600);
+      const m = Math.floor((total % 3600) / 60);
+      const s = total % 60;
+      const minutes = String(m).padStart(2, '0');
+      return (h > 0 ? `${h}:${minutes}` : `${minutes}`) + `:${String(s).padStart(2, '0')}`;
     }
-    function getPlaylistData() {
-      return Array.from(document.querySelectorAll('#playlistList li')).map(li => ({
-        path: li.dataset.path,
-        duration: li.dataset.duration
-      }));
+
+    function getPlaylistNodes() {
+      return Array.from(playlistList.children);
     }
-    function getPlaylist() {
-      return Array.from(document.querySelectorAll('#playlistList li')).map(li => cleanPath(li.dataset.path));
+
+    function updateSelectionStyles() {
+      const nodes = getPlaylistNodes();
+      nodes.forEach(node => {
+        node.classList.toggle('selected', selectedItemIds.has(node.dataset.itemId));
+      });
     }
-    function getMediaSource() {
-      return document.getElementById('mediaSource').value.trim();
-    }
-    async function addToPlaylist(paths, durationOverride) {
-      const ul = document.getElementById('playlistList');
-      for (const path of paths) {
-        const cleaned = cleanPath(path);
-        if (!cleaned) continue;
-        const li = document.createElement('li');
-        let duration = durationOverride !== undefined ? durationOverride : await window.mediaTools.getDuration(cleaned);
-        li.textContent = cleaned + " (" + formatTime(duration) + ")";
-        li.dataset.path = cleaned;
-        li.dataset.duration = duration || 0;
-        li.draggable = true;
-        ul.appendChild(li);
+
+    function pruneSelection() {
+      const nodes = getPlaylistNodes();
+      const existing = new Set(nodes.map(node => node.dataset.itemId));
+      let changed = false;
+      selectedItemIds.forEach(id => {
+        if (!existing.has(id)) {
+          selectedItemIds.delete(id);
+          changed = true;
+        }
+      });
+      if (!selectedItemIds.size) {
+        lastSelectedIndex = null;
+      } else if (changed || lastSelectedIndex == null) {
+        const ids = Array.from(selectedItemIds);
+        const lastId = ids[ids.length - 1];
+        const idx = nodes.findIndex(node => node.dataset.itemId === lastId);
+        lastSelectedIndex = idx === -1 ? null : idx;
       }
+      if (changed) {
+        updateSelectionStyles();
+      }
+    }
+
+    function clearSelection() {
+      if (!selectedItemIds.size) return;
+      selectedItemIds.clear();
+      lastSelectedIndex = null;
+      updateSelectionStyles();
+    }
+
+    function getSelectedNodesInOrder() {
+      const nodes = getPlaylistNodes();
+      return nodes.filter(node => selectedItemIds.has(node.dataset.itemId));
+    }
+
+    function getDraggingNodes() {
+      if (!dragSelectionIds || !dragSelectionIds.length) return [];
+      const idSet = new Set(dragSelectionIds);
+      return getPlaylistNodes().filter(node => idSet.has(node.dataset.itemId));
+    }
+
+    function handleRowSelection(event, node) {
+      const nodes = getPlaylistNodes();
+      const index = nodes.indexOf(node);
+      const id = node.dataset.itemId;
+      if (!id || index === -1) return;
+      if (event.shiftKey && lastSelectedIndex != null) {
+        const start = Math.min(lastSelectedIndex, index);
+        const end = Math.max(lastSelectedIndex, index);
+        selectedItemIds.clear();
+        for (let i = start; i <= end; i += 1) {
+          const itemId = nodes[i]?.dataset.itemId;
+          if (itemId) selectedItemIds.add(itemId);
+        }
+      } else if (event.metaKey || event.ctrlKey) {
+        if (selectedItemIds.has(id)) {
+          selectedItemIds.delete(id);
+        } else {
+          selectedItemIds.add(id);
+        }
+      } else {
+        selectedItemIds.clear();
+        selectedItemIds.add(id);
+      }
+      updateSelectionStyles();
+      lastSelectedIndex = index;
+    }
+
+    function finalizeReorder() {
+      dragSelectionIds = null;
+      syncActivePlaylistFromDom();
+      pruneSelection();
+      updateSelectionStyles();
+      recomputeCurrentIndex();
       updateStartEndTimes();
+      updatePlayingIndicator();
       saveSettings();
     }
-    function updateStartEndTimes() {
-      // Get current time as start
-      let now = new Date();
-      let curSeconds = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
-      let acc = curSeconds;
-      document.querySelectorAll('#playlistList li').forEach(li => {
-        let dur = parseFloat(li.dataset.duration) || 0;
-        let start = acc;
-        let end = acc + dur;
-        // Remove old .times span if present
-        let old = li.querySelector('.times');
-        if (old) old.remove();
-        let span = document.createElement('span');
-        span.className = 'times';
-        span.textContent = `Start: ${formatTime(start)}  End: ${formatTime(end)}`;
-        li.appendChild(span);
-        acc = end;
-      });
+
+    function moveSelectionToIndex(targetIndex) {
+      if (!dragSelectionIds || !dragSelectionIds.length) return;
+      const nodes = getPlaylistNodes();
+      const movingNodes = getDraggingNodes();
+      if (!movingNodes.length) return;
+      const fragment = document.createDocumentFragment();
+      movingNodes.forEach(node => fragment.appendChild(node));
+      const filtered = nodes.filter(node => !movingNodes.includes(node));
+      const clampedIndex = Math.max(0, Math.min(targetIndex, filtered.length));
+      const refNode = filtered[clampedIndex] || null;
+      playlistList.insertBefore(fragment, refNode);
+      finalizeReorder();
     }
 
-    // --- Drag-and-drop reordering logic ---
-    let dragSrcEl = null;
-    function handleDragStart(e) {
-      dragSrcEl = this;
-      this.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-    }
-    function handleDragEnd(e) {
-      this.classList.remove('dragging');
-      document.querySelectorAll('#playlistList li').forEach(li => li.classList.remove('over'));
-      updateStartEndTimes(); saveSettings();
-    }
-    function handleDragOver(e) { e.preventDefault(); return false; }
-    function handleDragEnter(e) { this.classList.add('over'); }
-    function handleDragLeave(e) { this.classList.remove('over'); }
-    function handleDrop(e) {
-      e.stopPropagation();
-      if (dragSrcEl !== this) {
-        const ul = document.getElementById('playlistList');
-        const nodes = Array.from(ul.children);
-        const srcIdx = nodes.indexOf(dragSrcEl);
-        const tgtIdx = nodes.indexOf(this);
-        if (srcIdx < tgtIdx) {
-          ul.insertBefore(dragSrcEl, this.nextSibling);
-        } else {
-          ul.insertBefore(dragSrcEl, this);
-        }
-        updateStartEndTimes();
-        saveSettings();
+    function moveSelectionToTargetNode(targetNode) {
+      if (!dragSelectionIds || !dragSelectionIds.length) return;
+      if (!targetNode) {
+        moveSelectionToIndex(getPlaylistNodes().length);
+        return;
       }
-      return false;
+      const nodes = getPlaylistNodes();
+      const movingNodes = getDraggingNodes();
+      if (!movingNodes.length) return;
+      if (movingNodes.includes(targetNode)) return;
+      const filtered = nodes.filter(node => !movingNodes.includes(node));
+      let insertIndex = filtered.indexOf(targetNode);
+      if (insertIndex === -1) {
+        insertIndex = filtered.length;
+      } else {
+        const originalIndex = nodes.indexOf(targetNode);
+        const firstMovingIndex = nodes.indexOf(movingNodes[0]);
+        if (firstMovingIndex < originalIndex) {
+          insertIndex += 1;
+        }
+      }
+      moveSelectionToIndex(insertIndex);
     }
-    function attachDragHandlers(li) {
-      li.addEventListener('dragstart', handleDragStart);
-      li.addEventListener('dragend', handleDragEnd);
-      li.addEventListener('dragover', handleDragOver);
-      li.addEventListener('dragenter', handleDragEnter);
-      li.addEventListener('dragleave', handleDragLeave);
-      li.addEventListener('drop', handleDrop);
-      li.addEventListener('dblclick', function() { li.remove(); updateStartEndTimes(); saveSettings(); });
-    }
-    // Observe for new <li> and attach drag handlers
-    const playlistList = document.getElementById('playlistList');
-    const observer = new MutationObserver(function(mutations) {
-      mutations.forEach(m => {
-        m.addedNodes.forEach(node => {
-          if (node.nodeName === 'LI') attachDragHandlers(node);
-        });
-      });
-    });
-    observer.observe(playlistList, { childList: true });
-    // Drag-and-drop files from desktop
-    playlistList.addEventListener('dragover', function(e) {
-      e.preventDefault();
-      playlistList.classList.add('dragover');
-    });
-    playlistList.addEventListener('dragleave', function(e) {
-      playlistList.classList.remove('dragover');
-    });
-    playlistList.addEventListener('drop', function(e) {
-      e.preventDefault();
-      playlistList.classList.remove('dragover');
-      const files = Array.from(e.dataTransfer.files);
-      const paths = files.map(file => file.path || file.name);
-      addToPlaylist(paths);
-    });
 
-    // --- OBS LOGIC ---
-    function setStatus(msg) {
-      document.getElementById('status').textContent = msg;
+    function getScheduleStartDate() {
+      const value = scheduleInput.value;
+      if (!value) return null;
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
     }
-    function setConnStatus(msg, color='black') {
+
+    function getTimelineStartDate() {
+      if (isValidDate(timelineAnchor)) {
+        return timelineAnchor;
+      }
+      const scheduleDate = getScheduleStartDate();
+      return isValidDate(scheduleDate) ? scheduleDate : null;
+    }
+
+    function formatClock(date) {
+      if (!(date instanceof Date) || Number.isNaN(date.getTime())) return '--:--';
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      const seconds = String(date.getSeconds()).padStart(2, '0');
+      return `${hours}:${minutes}:${seconds}`;
+    }
+
+    async function extractPathsFromDataTransfer(dt) {
+      if (!dt) return [];
+      const results = new Set();
+      const addPath = raw => {
+        const normalized = normalizePath(raw);
+        if (isLikelyFilePath(normalized)) {
+          results.add(normalized);
+        }
+      };
+
+      const fileList = dt.files ? Array.from(dt.files) : [];
+      fileList.forEach(file => {
+        if (!file) return;
+        if (file.path) {
+          addPath(file.path);
+        } else if (file.name) {
+          addPath(file.name);
+        }
+      });
+      if (results.size) {
+        return Array.from(results);
+      }
+
+      const addFromUriList = text => {
+        if (!text) return;
+        text.split(/\r?\n/).forEach(line => {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) return;
+          addPath(trimmed);
+        });
+      };
+      const addFromPlainText = text => {
+        if (!text) return;
+        text.split(/\r?\n/).forEach(line => {
+          const trimmed = line.trim();
+          if (!trimmed) return;
+          if (/^file:\/\//i.test(trimmed) || isLikelyFilePath(trimmed)) {
+            addPath(trimmed);
+          }
+        });
+      };
+      const addFromNsFilenames = text => {
+        if (!text) return;
+        try {
+          const parsed = JSON.parse(text);
+          if (Array.isArray(parsed)) {
+            parsed.forEach(addPath);
+            return;
+          }
+        } catch (err) {
+          // fall through to line-based parsing
+        }
+        text.split(/\r?\n/).forEach(line => {
+          const trimmed = line.trim().replace(/^\(|\)|,$/g, '');
+          if (!trimmed) return;
+          const unquoted = trimmed.replace(/^['\"]+|['\"]+$/g, '');
+          addPath(unquoted);
+        });
+      };
+
+      const stringItemPromises = [];
+      if (dt.items) {
+        Array.from(dt.items).forEach(item => {
+          if (!item) return;
+          if (item.kind === 'file') {
+            const file = typeof item.getAsFile === 'function' ? item.getAsFile() : null;
+            if (file) {
+              if (file.path) {
+                addPath(file.path);
+              } else if (file.name) {
+                addPath(file.name);
+              }
+            }
+          } else if (item.kind === 'string' && typeof item.getAsString === 'function') {
+            stringItemPromises.push(new Promise(resolve => {
+              item.getAsString(text => {
+                addFromUriList(text);
+                addFromPlainText(text);
+                addFromNsFilenames(text);
+                resolve();
+              });
+            }));
+          }
+        });
+      }
+
+      if (dt && typeof dt.getData === 'function') {
+        ['text/uri-list', 'public.file-url', 'com.apple.pasteboard.promised-file-url'].forEach(type => {
+          try {
+            addFromUriList(dt.getData(type));
+          } catch (err) {
+            // ignore unsupported type
+          }
+        });
+        ['text/plain', 'public.utf8-plain-text'].forEach(type => {
+          try {
+            addFromPlainText(dt.getData(type));
+          } catch (err) {
+            // ignore unsupported type
+          }
+        });
+        ['NSFilenamesPboardType'].forEach(type => {
+          try {
+            addFromNsFilenames(dt.getData(type));
+          } catch (err) {
+            // ignore unsupported type
+          }
+        });
+      }
+
+      if (stringItemPromises.length) {
+        await Promise.allSettled(stringItemPromises);
+      }
+
+      return Array.from(results);
+    }
+
+    function getMediaSource() {
+      const active = getActivePlaylist();
+      const inputValue = mediaSourceInput.value.trim();
+      if (active) {
+        const source = (active.mediaSource || '').trim();
+        return source || inputValue || active.name || 'Media';
+      }
+      return inputValue || 'Media';
+    }
+
+    function setStatus(msg) {
+      document.getElementById('status').textContent = msg || '';
+    }
+
+    function setConnStatus(msg, color = 'black') {
       const el = document.getElementById('connStatus');
       el.textContent = msg;
       el.style.color = color;
     }
-    function connect() {
-      if (ws && ws.readyState === 1) {
-        setConnStatus("Already connected", "green");
-        return;
-      }
-      const url = document.getElementById('wsUrl').value;
-      ws = new WebSocket(url);
-      ws.onopen = () => setConnStatus("Connected", "green");
-      ws.onclose = () => setConnStatus("Disconnected", "red");
-      ws.onerror = (e) => setConnStatus("Error", "red");
-      ws.onmessage = function(event) {
-        const msg = JSON.parse(event.data);
-        if (msg.op === 5 && msg.d && msg.d.eventType === "MediaInputPlaybackEnded") {
-          const endedInput = msg.d.eventData.inputName;
-          if (endedInput === mediaSource) playNext();
-        }
-      };
-      ws.addEventListener('open', function() {
-        ws.send(JSON.stringify({
-          "op": 1,
-          "d": { "rpcVersion": 1, "eventSubscriptions": (1 << 2) }
-        }));
+    function renderSidebar() {
+      playlistSidebar.innerHTML = '';
+      playlists.forEach(pl => {
+        if (!pl.id) pl.id = generateId('pl');
+        const li = document.createElement('li');
+        li.dataset.id = pl.id;
+        if (pl.id === activePlaylistId) li.classList.add('active');
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = pl.name || 'Playlist';
+        const countSpan = document.createElement('span');
+        countSpan.className = 'count';
+        countSpan.textContent = pl.items.length;
+        li.append(nameSpan, countSpan);
+        li.addEventListener('click', () => {
+          if (activePlaylistId !== pl.id) {
+            activatePlaylist(pl.id);
+            recomputeCurrentIndex();
+            updatePlayingIndicator();
+            saveSettings();
+          }
+        });
+        playlistSidebar.appendChild(li);
       });
     }
-    function sendRequest(requestType, requestData, cb) {
-      if (!ws || ws.readyState !== 1) {
-        setStatus("Not connected to OBS WebSocket.");
+
+    function activatePlaylist(id) {
+      if (!id) return;
+      activePlaylistId = id;
+      clearSelection();
+      renderSidebar();
+      timelineAnchor = getScheduleStartDate();
+      renderActivePlaylist();
+      const active = getActivePlaylist();
+      mediaSourceInput.value = (active && active.mediaSource) ? active.mediaSource : (active ? active.name : '');
+    }
+
+    function createPlaylistRow(item) {
+      const li = document.createElement('li');
+      li.dataset.itemId = item.id;
+      li.dataset.path = item.path;
+      li.dataset.duration = item.duration != null ? item.duration : '';
+      li.title = item.path;
+      li.draggable = true;
+      li.tabIndex = 0;
+
+      const title = document.createElement('span');
+      title.className = 'title';
+      title.textContent = extractFilename(item.path);
+
+      const duration = document.createElement('span');
+      duration.className = 'duration';
+      duration.textContent = formatTime(item.duration);
+
+      const start = document.createElement('span');
+      start.className = 'start';
+      start.textContent = '--:--';
+
+      const end = document.createElement('span');
+      end.className = 'end';
+      end.textContent = '--:--';
+
+      li.append(title, duration, start, end);
+      attachRowHandlers(li);
+      return li;
+    }
+
+    function renderActivePlaylist() {
+      playlistList.innerHTML = '';
+      const active = getActivePlaylist();
+      if (!active) return;
+      active.items = active.items.map(item => ({
+        id: item.id || generateId('item'),
+        path: normalizePath(item.path || ''),
+        duration: Number.isFinite(item.duration) ? item.duration : null
+      })).filter(item => isLikelyFilePath(item.path));
+      active.items.forEach(item => {
+        const row = createPlaylistRow(item);
+        playlistList.appendChild(row);
+      });
+      pruneSelection();
+      updateSelectionStyles();
+      updateStartEndTimes();
+      updatePlayingIndicator();
+    }
+
+    function attachRowHandlers(li) {
+      li.addEventListener('click', function(event) {
+        if (event.defaultPrevented) return;
+        handleRowSelection(event, li);
+      });
+      li.addEventListener('dragstart', function(e) {
+        if (!selectedItemIds.has(this.dataset.itemId) || e.shiftKey || e.metaKey || e.ctrlKey) {
+          handleRowSelection(e, this);
+        }
+        dragSelectionIds = Array.from(selectedItemIds);
+        this.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        try {
+          e.dataTransfer.setData('text/plain', dragSelectionIds.join(','));
+        } catch (err) {
+          // ignore inability to set drag data
+        }
+      });
+      li.addEventListener('dragend', function() {
+        this.classList.remove('dragging');
+        getPlaylistNodes().forEach(node => node.classList.remove('over'));
+        playlistList.classList.remove('dragover');
+        dragSelectionIds = null;
+        updateStartEndTimes();
+      });
+      li.addEventListener('dragover', function(e) {
+        if (!dragSelectionIds || !dragSelectionIds.length) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+      });
+      li.addEventListener('dragenter', function() {
+        if (!dragSelectionIds || !dragSelectionIds.length) return;
+        if (selectedItemIds.has(this.dataset.itemId)) return;
+        this.classList.add('over');
+      });
+      li.addEventListener('dragleave', function() {
+        this.classList.remove('over');
+      });
+      li.addEventListener('drop', function(e) {
+        e.preventDefault();
+        this.classList.remove('over');
+        playlistList.classList.remove('dragover');
+        if (!dragSelectionIds || !dragSelectionIds.length) return;
+        moveSelectionToTargetNode(this);
+      });
+      li.addEventListener('dblclick', function() {
+        const id = this.dataset.itemId;
+        if (id) {
+          removeItemsByIds([id]);
+        }
+      });
+    }
+
+    function syncActivePlaylistFromDom() {
+      const active = getActivePlaylist();
+      if (!active) return;
+      const existing = new Map(active.items.map(item => [item.id, item]));
+      active.items = Array.from(playlistList.children).map(node => {
+        const item = existing.get(node.dataset.itemId) || {};
+        const durationAttr = node.dataset.duration;
+        return {
+          id: node.dataset.itemId,
+          path: item.path || node.dataset.path,
+          duration: durationAttr === '' ? (Number.isFinite(item.duration) ? item.duration : null) : Number(durationAttr)
+        };
+      });
+    }
+
+    function updateStartEndTimes() {
+      const scheduleStart = getTimelineStartDate();
+      let acc = 0;
+      Array.from(playlistList.children).forEach(node => {
+        const duration = Number(node.dataset.duration);
+        const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
+        const startSeconds = acc;
+        const endSeconds = acc + safeDuration;
+        let startText = formatTime(startSeconds);
+        let endText = formatTime(endSeconds);
+        if (scheduleStart) {
+          const startDate = new Date(scheduleStart.getTime() + startSeconds * 1000);
+          const endDate = new Date(scheduleStart.getTime() + endSeconds * 1000);
+          startText = formatClock(startDate);
+          endText = formatClock(endDate);
+        }
+        const durationEl = node.querySelector('.duration');
+        const startEl = node.querySelector('.start');
+        const endEl = node.querySelector('.end');
+        if (durationEl) durationEl.textContent = formatTime(safeDuration);
+        if (startEl) startEl.textContent = startText;
+        if (endEl) endEl.textContent = endText;
+        acc += safeDuration;
+      });
+    }
+
+    function updatePlayingIndicator() {
+      Array.from(playlistList.children).forEach(node => {
+        node.classList.toggle('playing', playing && node.dataset.itemId === playingItemId);
+      });
+    }
+
+    function getElapsedDurationBeforeIndex(idx) {
+      if (idx <= 0) return 0;
+      const active = getActivePlaylist();
+      if (!active) return 0;
+      let total = 0;
+      for (let i = 0; i < Math.min(idx, active.items.length); i += 1) {
+        const duration = Number(active.items[i]?.duration);
+        if (Number.isFinite(duration) && duration > 0) {
+          total += duration;
+        }
+      }
+      return total;
+    }
+
+    function reanchorTimelineToIndex(idx) {
+      const active = getActivePlaylist();
+      if (!active) return false;
+      if (idx < 0 || idx >= active.items.length) return false;
+      const item = active.items[idx];
+      playing = true;
+      playingItemId = item.id;
+      currentIndex = idx;
+      const elapsedBefore = getElapsedDurationBeforeIndex(idx);
+      timelineAnchor = new Date(Date.now() - elapsedBefore * 1000);
+      updateStartEndTimes();
+      updatePlayingIndicator();
+      setStatus(`Playing: ${item.path}`);
+      return true;
+    }
+
+    function handleMediaPlaybackStarted(eventData) {
+      const rawInputName = eventData?.inputName;
+      const inputName = typeof rawInputName === 'string' ? rawInputName.trim() : '';
+      if (!inputName) return;
+      const targetSource = getMediaSource();
+      const normalizedTarget = typeof targetSource === 'string' ? targetSource.trim() : '';
+      if (!normalizedTarget || inputName !== normalizedTarget) return;
+      sendRequest('GetMediaInputStatus', { inputName }, data => {
+        const response = data?.responseData || {};
+        const candidates = [response.mediaPath, response.mediaFilename, response.mediaPathName, response.mediaFile];
+        const rawPath = candidates.find(value => typeof value === 'string' && value.trim().length);
+        if (rawPath) {
+          const normalized = normalizePath(rawPath);
+          if (isLikelyFilePath(normalized)) {
+            const active = getActivePlaylist();
+            if (active) {
+              const matchIndex = active.items.findIndex(item => normalizePath(item.path || '') === normalized);
+              if (matchIndex !== -1) {
+                reanchorTimelineToIndex(matchIndex);
+                startPolling();
+                return;
+              }
+            }
+          }
+        }
+        timelineAnchor = new Date();
+        updateStartEndTimes();
+        updatePlayingIndicator();
+        startPolling();
+      });
+    }
+
+    function recomputeCurrentIndex() {
+      if (!playing) {
+        currentIndex = 0;
         return;
       }
-      const requestId = "req-" + (requestCounter++);
+      const active = getActivePlaylist();
+      if (!active) {
+        playing = false;
+        playingItemId = null;
+        currentIndex = 0;
+        if (poller) clearInterval(poller);
+        return;
+      }
+      const idx = active.items.findIndex(item => item.id === playingItemId);
+      if (idx === -1) {
+        playing = false;
+        playingItemId = null;
+        currentIndex = 0;
+        if (poller) clearInterval(poller);
+      } else {
+        currentIndex = idx;
+      }
+    }
+
+    function removeItemsByIds(ids) {
+      if (!Array.isArray(ids) || !ids.length) return;
+      const active = getActivePlaylist();
+      if (!active) return;
+      const idSet = new Set(ids.filter(Boolean));
+      if (!idSet.size) return;
+      const originalItems = active.items.slice();
+      if (!originalItems.some(item => idSet.has(item.id))) return;
+      const playingRemoved = playing && idSet.has(playingItemId);
+      let removedBeforeCurrent = 0;
+      if (playing && !playingRemoved) {
+        for (let i = 0; i < Math.min(currentIndex, originalItems.length); i += 1) {
+          if (idSet.has(originalItems[i]?.id)) {
+            removedBeforeCurrent += 1;
+          }
+        }
+      }
+      active.items = originalItems.filter(item => !idSet.has(item.id));
+      idSet.forEach(id => selectedItemIds.delete(id));
+      if (!selectedItemIds.size) {
+        lastSelectedIndex = null;
+      }
+      if (playing) {
+        if (playingRemoved) {
+          playing = false;
+          playingItemId = null;
+          currentIndex = 0;
+          if (poller) clearInterval(poller);
+          setStatus('Playback stopped (item removed).');
+          const scheduleDate = getScheduleStartDate();
+          timelineAnchor = isValidDate(scheduleDate) ? scheduleDate : null;
+        } else if (removedBeforeCurrent > 0) {
+          currentIndex = Math.max(0, currentIndex - removedBeforeCurrent);
+        }
+      }
+      renderActivePlaylist();
+      saveSettings();
+    }
+
+    function removeItemById(itemId) {
+      removeItemsByIds([itemId]);
+    }
+
+    async function getFileDuration(path) {
+      if (!window.mediaTools || typeof window.mediaTools.getDuration !== 'function') {
+        return null;
+      }
+      try {
+        const duration = await window.mediaTools.getDuration(path);
+        const numericDuration = typeof duration === 'number' ? duration : Number(duration);
+        return Number.isFinite(numericDuration) ? numericDuration : null;
+      } catch (err) {
+        console.warn('Failed to get duration for', path, err);
+        return null;
+      }
+    }
+
+    async function appendPathsToActivePlaylist(paths) {
+      const active = getActivePlaylist();
+      if (!active || !Array.isArray(paths) || !paths.length) return;
+      const existingPaths = new Set(active.items.map(item => normalizePath(item.path || '')).filter(isLikelyFilePath));
+      const addedIds = new Set();
+      for (const raw of paths) {
+        const cleaned = normalizePath(raw);
+        if (!isLikelyFilePath(cleaned)) continue;
+        if (existingPaths.has(cleaned)) continue;
+        const id = generateId('item');
+        const item = {
+          id,
+          path: cleaned,
+          duration: null
+        };
+        active.items.push(item);
+        addedIds.add(id);
+        existingPaths.add(cleaned);
+      }
+      if (!addedIds.size) return;
+      selectedItemIds.clear();
+      addedIds.forEach(id => selectedItemIds.add(id));
+      renderActivePlaylist();
+      await saveSettings();
+      const refreshed = getActivePlaylist();
+      if (refreshed) {
+        const itemsToPopulate = refreshed.items.filter(item => addedIds.has(item.id));
+        if (itemsToPopulate.length) {
+          populateDurationsForItems(itemsToPopulate).catch(err => {
+            console.warn('Failed to populate durations', err);
+          });
+        }
+      }
+    }
+
+    async function populateDurationsForItems(items) {
+      if (!Array.isArray(items) || !items.length) return;
+      let updatedData = false;
+      let updatedDom = false;
+      for (const item of items) {
+        if (!item || item.duration != null) continue;
+        const duration = await getFileDuration(item.path);
+        if (!Number.isFinite(duration)) continue;
+        item.duration = duration;
+        updatedData = true;
+        const node = playlistList.querySelector(`[data-item-id="${item.id}"]`);
+        if (node) {
+          node.dataset.duration = String(duration);
+          const durationEl = node.querySelector('.duration');
+          if (durationEl) {
+            durationEl.textContent = formatTime(duration);
+          }
+          updatedDom = true;
+        }
+      }
+      if (updatedDom) {
+        updateStartEndTimes();
+      }
+      if (updatedData) {
+        await saveSettings();
+      }
+    }
+
+    async function refreshMissingDurations(playlist) {
+      if (!playlist) return;
+      const missing = playlist.items.filter(item => item.duration == null);
+      if (!missing.length) return;
+      await populateDurationsForItems(missing);
+    }
+
+    async function saveSettings() {
+      if (isRestoring || !window.mediaTools || typeof window.mediaTools.saveData !== 'function') return;
+      const serializedPlaylists = playlists.map(pl => ({
+        id: pl.id,
+        name: pl.name,
+        mediaSource: pl.mediaSource || '',
+        items: pl.items.map(item => ({
+          id: item.id,
+          path: item.path,
+          duration: item.duration == null ? null : item.duration
+        }))
+      }));
+      const active = getActivePlaylist();
+      const tasks = [
+        window.mediaTools.saveData('wsUrl', wsUrlInput.value),
+        window.mediaTools.saveData('scheduleTime', scheduleInput.value),
+        window.mediaTools.saveData('playlists', serializedPlaylists),
+        window.mediaTools.saveData('activePlaylistId', activePlaylistId)
+      ];
+      if (active) {
+        tasks.push(window.mediaTools.saveData('mediaSource', active.mediaSource || ''));
+      }
+      await Promise.allSettled(tasks);
+    }
+    async function loadSettings() {
+      if (!window.mediaTools || typeof window.mediaTools.loadData !== 'function') {
+        ensureDefaultPlaylist();
+        activatePlaylist(activePlaylistId);
+        timelineAnchor = getScheduleStartDate();
+        updateStartEndTimes();
+        return;
+      }
+      isRestoring = true;
+      const [wsUrl, storedPlaylists, storedActiveId, scheduleTime, legacyMediaSource, legacyPlaylist] = await Promise.all([
+        window.mediaTools.loadData('wsUrl'),
+        window.mediaTools.loadData('playlists'),
+        window.mediaTools.loadData('activePlaylistId'),
+        window.mediaTools.loadData('scheduleTime'),
+        window.mediaTools.loadData('mediaSource'),
+        window.mediaTools.loadData('playlist')
+      ]);
+      if (wsUrl) wsUrlInput.value = wsUrl;
+      if (scheduleTime) scheduleInput.value = scheduleTime;
+      timelineAnchor = getScheduleStartDate();
+      playlists.length = 0;
+      let convertedLegacy = false;
+      if (Array.isArray(storedPlaylists) && storedPlaylists.length) {
+        storedPlaylists.forEach(pl => {
+          const normalizedItems = Array.isArray(pl.items) ? pl.items.map(item => ({
+            id: item.id || generateId('item'),
+            path: normalizePath(item.path || ''),
+            duration: Number.isFinite(item.duration) ? item.duration : null
+          })).filter(item => isLikelyFilePath(item.path)) : [];
+          playlists.push({
+            id: pl.id || generateId('pl'),
+            name: pl.name || 'Playlist',
+            mediaSource: pl.mediaSource || pl.name || legacyMediaSource || 'Media',
+            items: normalizedItems
+          });
+        });
+      }
+      if (!playlists.length && Array.isArray(legacyPlaylist) && legacyPlaylist.length) {
+        playlists.push({
+          id: generateId('pl'),
+          name: 'Playlist 1',
+          mediaSource: legacyMediaSource || 'Playlist 1',
+          items: legacyPlaylist.map(item => ({
+            id: generateId('item'),
+            path: normalizePath(item?.path || ''),
+            duration: Number.isFinite(item?.duration) ? item.duration : null
+          })).filter(item => isLikelyFilePath(item.path))
+        });
+        convertedLegacy = true;
+      }
+      ensureDefaultPlaylist();
+      if (storedActiveId && playlists.some(pl => pl.id === storedActiveId)) {
+        activePlaylistId = storedActiveId;
+      }
+      activatePlaylist(activePlaylistId);
+      isRestoring = false;
+      await refreshMissingDurations(getActivePlaylist());
+      updateStartEndTimes();
+      if (convertedLegacy) {
+        await saveSettings();
+      }
+    }
+
+    function updateStreamButton() {
+      const btn = document.getElementById('streamBtn');
+      if (!btn) return;
+      btn.textContent = isStreaming ? 'Stop Streaming' : 'Start Streaming';
+    }
+
+    function refreshStreamState() {
+      if (!ws || ws.readyState !== 1) return;
+      sendRequest('GetStreamStatus', {}, data => {
+        const active = !!(data && data.responseData && data.responseData.outputActive);
+        isStreaming = active;
+        updateStreamButton();
+      });
+    }
+
+    function connect() {
+      if (ws && ws.readyState === 1) {
+        setConnStatus('Already connected', 'green');
+        return;
+      }
+      const url = wsUrlInput.value;
+      ws = new WebSocket(url);
+      ws.onopen = () => {
+        setConnStatus('Connected', 'green');
+      };
+      ws.onclose = () => {
+        setConnStatus('Disconnected', 'red');
+        isStreaming = false;
+        updateStreamButton();
+      };
+      ws.onerror = () => setConnStatus('Error', 'red');
+      ws.onmessage = event => {
+        const msg = JSON.parse(event.data);
+        if (msg.op === 5 && msg.d) {
+          if (msg.d.eventType === 'MediaInputPlaybackEnded') {
+            const endedInput = msg.d.eventData?.inputName;
+            if (endedInput === getMediaSource()) {
+              playNext();
+            }
+          } else if (msg.d.eventType === 'MediaInputPlaybackStarted') {
+            handleMediaPlaybackStarted(msg.d.eventData);
+          } else if (msg.d.eventType === 'StreamStateChanged') {
+            isStreaming = !!msg.d.eventData?.outputActive;
+            updateStreamButton();
+          }
+        } else if (msg.op === 2) {
+          refreshStreamState();
+        }
+      };
+      ws.addEventListener('open', () => {
+        ws.send(JSON.stringify({
+          op: 1,
+          d: { rpcVersion: 1, eventSubscriptions: ((1 << 2) | (1 << 3)) }
+        }));
+        refreshStreamState();
+      });
+    }
+
+    function sendRequest(requestType, requestData, cb) {
+      if (!ws || ws.readyState !== 1) {
+        setStatus('Not connected to OBS WebSocket.');
+        return;
+      }
+      const requestId = `req-${requestCounter++}`;
       const msg = { op: 6, d: { requestType, requestId, requestData } };
       ws.send(JSON.stringify(msg));
       if (cb) {
-        const handler = function(event) {
+        const handler = event => {
           const resp = JSON.parse(event.data);
           if (resp.op === 7 && resp.d.requestId === requestId) {
             ws.removeEventListener('message', handler);
@@ -284,121 +1224,304 @@
         ws.addEventListener('message', handler);
       }
     }
-    function playIndex(idx) {
-      playlist = getPlaylist();
-      mediaSource = getMediaSource();
-      if (poller) clearInterval(poller);
-      if (idx >= playlist.length) {
-        setStatus("Done!");
-        playing = false;
-        return;
-      }
-      currentIndex = idx;
-      const file = playlist[idx];
-      setStatus(`Playing: ${file}`);
-      sendRequest("SetInputSettings", {
-        inputName: mediaSource,
-        inputSettings: { local_file: file },
-        overlay: false
-      }, () => {
-        setTimeout(() => {
-          sendRequest("TriggerMediaInputAction", {
-            inputName: mediaSource,
-            mediaAction: "restart"
-          });
-          startPolling();
-        }, 200);
-      });
-    }
-    function playNext() {
-      if (poller) clearInterval(poller);
-      playIndex(currentIndex + 1);
-    }
+
     function startPolling() {
       if (poller) clearInterval(poller);
       poller = setInterval(() => {
-        sendRequest("GetMediaInputStatus", {
-          inputName: getMediaSource()
-        }, (data) => {
+        sendRequest('GetMediaInputStatus', { inputName: getMediaSource() }, data => {
           if (!data || !data.responseData) return;
-          const s = data.responseData;
-          if (s.mediaState === "OBS_MEDIA_STATE_ENDED" || s.mediaState === "OBS_MEDIA_STATE_STOPPED") {
+          const status = data.responseData;
+          if (status.mediaState === 'OBS_MEDIA_STATE_ENDED' || status.mediaState === 'OBS_MEDIA_STATE_STOPPED') {
             playNext();
-          } else if (typeof s.mediaDuration === "number" && typeof s.mediaCursor === "number") {
-            if (s.mediaDuration > 0 && (s.mediaDuration - s.mediaCursor) < 500) {
+          } else if (typeof status.mediaDuration === 'number' && typeof status.mediaCursor === 'number') {
+            if (status.mediaDuration > 0 && (status.mediaDuration - status.mediaCursor) < 500) {
               playNext();
             }
           }
         });
       }, 500);
     }
-    document.getElementById('connectBtn').onclick = connect;
-    document.getElementById('playBtn').onclick = function() {
-      if (!ws || ws.readyState !== 1) {
-        setStatus("Not connected to OBS WebSocket.");
+
+    function playIndex(idx) {
+      const active = getActivePlaylist();
+      if (!active) return;
+      if (idx >= active.items.length) {
+        playing = false;
+        playingItemId = null;
+        currentIndex = 0;
+        if (poller) clearInterval(poller);
+        setStatus('Done!');
+        updatePlayingIndicator();
+        const scheduleDate = getScheduleStartDate();
+        timelineAnchor = isValidDate(scheduleDate) ? scheduleDate : null;
+        updateStartEndTimes();
         return;
       }
-      playlist = getPlaylist();
-      if (playlist.length === 0) {
-        setStatus("Playlist is empty.");
+      const item = active.items[idx];
+      if (!item) {
+        playNext();
+        return;
+      }
+      if (!reanchorTimelineToIndex(idx)) {
+        playNext();
+        return;
+      }
+      const file = item.path;
+      const mediaSourceName = getMediaSource();
+      active.mediaSource = mediaSourceName;
+      mediaSourceInput.value = mediaSourceName;
+      saveSettings();
+      setStatus(`Playing: ${file}`);
+      sendRequest('SetInputSettings', {
+        inputName: mediaSourceName,
+        inputSettings: { local_file: file },
+        overlay: false
+      }, () => {
+        setTimeout(() => {
+          sendRequest('TriggerMediaInputAction', {
+            inputName: mediaSourceName,
+            mediaAction: 'restart'
+          });
+          startPolling();
+          updatePlayingIndicator();
+        }, 200);
+      });
+    }
+
+    function playNext() {
+      if (poller) clearInterval(poller);
+      recomputeCurrentIndex();
+      if (!playing) return;
+      playIndex(currentIndex + 1);
+    }
+
+    document.getElementById('connectBtn').onclick = connect;
+
+    document.getElementById('playBtn').onclick = () => {
+      if (!ws || ws.readyState !== 1) {
+        setStatus('Not connected to OBS WebSocket.');
+        return;
+      }
+      const active = getActivePlaylist();
+      if (!active || !active.items.length) {
+        setStatus('Playlist is empty.');
         return;
       }
       playing = true;
       playIndex(0);
     };
-    // Start streaming button
-    document.getElementById('streamBtn').onclick = function() {
-      if (!ws || ws.readyState !== 1) {
-        setStatus("Not connected to OBS WebSocket.");
+
+    document.getElementById('skipBtn').onclick = () => {
+      const active = getActivePlaylist();
+      if (!active || !active.items.length) {
+        setStatus('Playlist is empty.');
         return;
       }
-      sendRequest("StartStream", {}, (data) => {
-        setStatus("Streaming started!");
-      });
-    };
-    // File picker logic
-    const fileInput = document.getElementById('fileInput');
-    document.getElementById('addFileBtn').onclick = function() {
-      fileInput.value = '';
-      fileInput.click();
-    };
-    fileInput.onchange = function(e) {
-      const files = Array.from(fileInput.files);
-      const paths = files.map(file => file.path || file.name);
-      addToPlaylist(paths);
+      if (!playing) {
+        const activeIdx = active.items.findIndex(item => item.id === playingItemId);
+        const baseIndex = activeIdx !== -1 ? activeIdx : Math.max(-1, currentIndex - 1);
+        const targetIndex = baseIndex + 1;
+        if (targetIndex >= active.items.length) {
+          setStatus('Reached end of playlist.');
+          return;
+        }
+        playing = true;
+        playIndex(Math.max(0, targetIndex));
+        return;
+      }
+      playNext();
     };
 
-    // --- Scheduling ---
-    document.getElementById('scheduleBtn').onclick = function() {
-      const dateStr = document.getElementById('scheduleTime').value;
+    updateStreamButton();
+
+    document.getElementById('streamBtn').onclick = () => {
+      if (!ws || ws.readyState !== 1) {
+        setStatus('Not connected to OBS WebSocket.');
+        return;
+      }
+      const requestType = isStreaming ? 'StopStream' : 'StartStream';
+      sendRequest(requestType, {}, data => {
+        const succeeded = data?.requestStatus?.result === true;
+        if (succeeded) {
+          isStreaming = !isStreaming;
+          updateStreamButton();
+          setStatus(isStreaming ? 'Streaming started!' : 'Streaming stopped.');
+        } else {
+          setStatus('Failed to toggle streaming.');
+        }
+      });
+    };
+    document.getElementById('scheduleBtn').onclick = () => {
+      const dateStr = scheduleInput.value;
       if (!dateStr) {
-        setStatus("Pick a date and time.");
+        setStatus('Pick a date and time.');
         return;
       }
       const target = new Date(dateStr);
       const now = new Date();
       const ms = target.getTime() - now.getTime();
       if (ms <= 0) {
-        setStatus("Scheduled time must be in the future.");
+        setStatus('Scheduled time must be in the future.');
         return;
       }
-      setStatus("Scheduled for " + target.toLocaleString());
+      setStatus(`Scheduled for ${target.toLocaleString()}`);
       if (scheduleTimeout) clearTimeout(scheduleTimeout);
       scheduleTimeout = setTimeout(() => {
-        // Start streaming
         document.getElementById('streamBtn').click();
-        // Start playlist
         document.getElementById('playBtn').click();
       }, ms);
       saveSettings();
     };
 
-    // --- Persistence triggers ---
-    window.addEventListener('DOMContentLoaded', loadSettings);
-    document.getElementById('wsUrl').addEventListener('input', saveSettings);
-    document.getElementById('mediaSource').addEventListener('input', saveSettings);
-    document.getElementById('scheduleTime').addEventListener('input', saveSettings);
+    document.getElementById('addFileBtn').onclick = async () => {
+      if (window.mediaTools && typeof window.mediaTools.selectFiles === 'function') {
+        const paths = await window.mediaTools.selectFiles();
+        if (Array.isArray(paths) && paths.length) {
+          await appendPathsToActivePlaylist(paths);
+        }
+      } else {
+        const fileInput = document.getElementById('fileInput');
+        fileInput.value = '';
+        fileInput.click();
+      }
+    };
 
+    document.getElementById('fileInput').onchange = async function() {
+      const files = Array.from(this.files || []);
+      const paths = files.map(file => file.path || file.name).filter(Boolean);
+      if (paths.length) {
+        await appendPathsToActivePlaylist(paths);
+      }
+    };
+
+    function handleGlobalDrag(e) {
+      if (dragSelectionIds && dragSelectionIds.length) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'copy';
+      }
+    }
+
+    async function handleGlobalDrop(e) {
+      if (dragSelectionIds && dragSelectionIds.length) return;
+      e.preventDefault();
+      e.stopPropagation();
+      playlistList.classList.remove('dragover');
+      try {
+        const paths = await extractPathsFromDataTransfer(e.dataTransfer);
+        if (paths.length) {
+          await appendPathsToActivePlaylist(paths);
+        }
+      } catch (err) {
+        console.warn('Failed to add dropped files', err);
+      }
+    }
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+      window.addEventListener(eventName, handleGlobalDrag);
+      document.addEventListener(eventName, handleGlobalDrag);
+      if (document.body) {
+        document.body.addEventListener(eventName, handleGlobalDrag);
+      }
+    });
+    window.addEventListener('drop', handleGlobalDrop);
+    document.addEventListener('drop', handleGlobalDrop);
+    if (document.body) {
+      document.body.addEventListener('drop', handleGlobalDrop);
+    }
+
+    playlistList.addEventListener('dragover', e => {
+      e.preventDefault();
+      if (dragSelectionIds && dragSelectionIds.length) {
+        e.dataTransfer.dropEffect = 'move';
+      } else if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'copy';
+      }
+      playlistList.classList.add('dragover');
+    });
+    playlistList.addEventListener('dragleave', () => {
+      playlistList.classList.remove('dragover');
+    });
+    playlistList.addEventListener('drop', async e => {
+      e.preventDefault();
+      e.stopPropagation();
+      playlistList.classList.remove('dragover');
+      if (dragSelectionIds && dragSelectionIds.length) {
+        moveSelectionToTargetNode(null);
+        return;
+      }
+      const paths = await extractPathsFromDataTransfer(e.dataTransfer);
+      if (paths.length) {
+        await appendPathsToActivePlaylist(paths);
+      }
+    });
+    playlistList.addEventListener('click', event => {
+      if (event.target === playlistList) {
+        clearSelection();
+      }
+    });
+
+    document.addEventListener('click', event => {
+      if (!playlistList.contains(event.target)) {
+        clearSelection();
+      }
+    });
+
+    document.addEventListener('keydown', event => {
+      if (event.defaultPrevented) return;
+      if (event.key !== 'Delete' && event.key !== 'Backspace') return;
+      const target = event.target;
+      if (!target) return;
+      const tagName = target.tagName;
+      if (tagName === 'INPUT' || tagName === 'TEXTAREA' || target.isContentEditable) {
+        return;
+      }
+      if (!selectedItemIds.size) return;
+      event.preventDefault();
+      removeItemsByIds(Array.from(selectedItemIds));
+    });
+
+    document.getElementById('newPlaylistBtn').onclick = () => {
+      const suggested = `Playlist ${playlists.length + 1}`;
+      const name = window.prompt('Playlist name (matches VLC source)?', suggested);
+      if (!name) return;
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      const newPlaylist = {
+        id: generateId('pl'),
+        name: trimmed,
+        mediaSource: trimmed,
+        items: []
+      };
+      playlists.push(newPlaylist);
+      activatePlaylist(newPlaylist.id);
+      saveSettings();
+    };
+
+    mediaSourceInput.addEventListener('input', () => {
+      const active = getActivePlaylist();
+      if (!active) return;
+      active.mediaSource = mediaSourceInput.value.trim();
+      saveSettings();
+    });
+
+    wsUrlInput.addEventListener('input', () => {
+      saveSettings();
+    });
+
+    scheduleInput.addEventListener('input', () => {
+      const scheduleDate = getScheduleStartDate();
+      timelineAnchor = isValidDate(scheduleDate) ? scheduleDate : null;
+      updateStartEndTimes();
+      saveSettings();
+    });
+
+    if (document.readyState === 'loading') {
+      window.addEventListener('DOMContentLoaded', loadSettings);
+    } else {
+      loadSettings();
+    }
   </script>
 </body>
 </html>
