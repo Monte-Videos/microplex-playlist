@@ -1,21 +1,22 @@
-const { contextBridge } = require('electron');
-const ffmpeg = require('fluent-ffmpeg');
-const Store = require('electron-store');
-const store = new Store();
+const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('mediaTools', {
-  getDuration: (filePath) => {
-    return new Promise((resolve) => {
-      ffmpeg.ffprobe(filePath, (err, metadata) => {
-        if (err || !metadata || !metadata.format) return resolve(null);
-        resolve(metadata.format.duration || null);
-      });
-    });
+  async selectFiles() {
+    try {
+      const paths = await ipcRenderer.invoke('mediaTools:select-files');
+      return Array.isArray(paths) ? paths : [];
+    } catch (err) {
+      console.warn('selectFiles failed', err);
+      return [];
+    }
   },
-  saveData: (key, value) => {
-    store.set(key, value);
+  getDuration(filePath) {
+    return ipcRenderer.invoke('mediaTools:get-duration', filePath);
   },
-  loadData: (key) => {
-    return store.get(key);
+  saveData(key, value) {
+    return ipcRenderer.invoke('mediaTools:save-data', key, value);
+  },
+  loadData(key) {
+    return ipcRenderer.invoke('mediaTools:load-data', key);
   }
 });
