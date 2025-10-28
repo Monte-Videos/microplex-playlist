@@ -352,6 +352,13 @@
       return cleaned;
     }
 
+    function isLikelyFilePath(path) {
+      if (!path) return false;
+      if (/^\\\\/.test(path)) return true;
+      if (/^[A-Za-z]:[\\/]/.test(path)) return true;
+      return path.startsWith('/');
+    }
+
     function extractFilename(path) {
       if (!path) return '';
       const segments = path.split(/\\|\//);
@@ -519,11 +526,11 @@
       return `${hours}:${minutes}:${seconds}`;
     }
 
-    async function extractPathsFromDataTransfer(dt) {
+    function extractPathsFromDataTransfer(dt) {
       const results = new Set();
       const addPath = raw => {
         const normalized = normalizePath(raw);
-        if (normalized) {
+        if (isLikelyFilePath(normalized)) {
           results.add(normalized);
         }
       };
@@ -540,76 +547,46 @@
         text.split(/\r?\n/).forEach(line => {
           const trimmed = line.trim();
           if (!trimmed) return;
-          if (/^file:\/\//i.test(trimmed) || trimmed.startsWith('/') || /^[A-Za-z]:/.test(trimmed)) {
+          if (/^file:\/\//i.test(trimmed) || isLikelyFilePath(trimmed)) {
             addPath(trimmed);
           }
         });
       };
       if (dt && dt.files) {
-        for (const file of Array.from(dt.files)) {
+        Array.from(dt.files).forEach(file => {
           if (file && file.path) {
             addPath(file.path);
           }
-        }
+        });
       }
-      const pending = [];
       if (dt && dt.items) {
-        for (const item of Array.from(dt.items)) {
-          if (!item) continue;
+        Array.from(dt.items).forEach(item => {
+          if (!item) return;
           if (item.kind === 'file') {
-            const file = item.getAsFile();
+            const file = typeof item.getAsFile === 'function' ? item.getAsFile() : null;
             if (file && file.path) {
               addPath(file.path);
-            } else if (typeof item.webkitGetAsEntry === 'function') {
-              const entry = item.webkitGetAsEntry();
-              if (entry && entry.isFile && typeof entry.file === 'function') {
-                pending.push(new Promise(resolve => {
-                  entry.file(f => {
-                    if (f && f.path) {
-                      addPath(f.path);
-                    }
-                    resolve();
-                  }, () => resolve());
-                }));
-              }
             }
-          } else if (item.kind === 'string' && typeof item.getAsString === 'function') {
-            pending.push(new Promise(resolve => {
-              item.getAsString(str => {
-                addFromUriList(str);
-                addFromPlainText(str);
-                resolve();
-              });
-            }));
           }
-        }
+        });
       }
       if (dt && typeof dt.getData === 'function') {
-        try {
-          addFromUriList(dt.getData('text/uri-list'));
-        } catch (err) {
-          // ignore unsupported type
-        }
-        try {
-          addFromUriList(dt.getData('public.file-url'));
-        } catch (err) {
-          // ignore unsupported type
-        }
-        try {
-          addFromPlainText(dt.getData('text/plain'));
-        } catch (err) {
-          // ignore unsupported type
-        }
-        try {
-          addFromPlainText(dt.getData('public.utf8-plain-text'));
-        } catch (err) {
-          // ignore unsupported type
-        }
+        ['text/uri-list', 'public.file-url'].forEach(type => {
+          try {
+            addFromUriList(dt.getData(type));
+          } catch (err) {
+            // ignore unsupported type
+          }
+        });
+        ['text/plain', 'public.utf8-plain-text'].forEach(type => {
+          try {
+            addFromPlainText(dt.getData(type));
+          } catch (err) {
+            // ignore unsupported type
+          }
+        });
       }
-      if (pending.length) {
-        await Promise.allSettled(pending);
-      }
-      return Array.from(results).filter(Boolean);
+      return Array.from(results);
     }
 
     function getMediaSource() {
@@ -705,7 +682,7 @@
         id: item.id || generateId('item'),
         path: normalizePath(item.path || ''),
         duration: Number.isFinite(item.duration) ? item.duration : null
-      })).filter(item => item.path);
+      })).filter(item => isLikelyFilePath(item.path));
       active.items.forEach(item => {
         const row = createPlaylistRow(item);
         playlistList.appendChild(row);
@@ -913,10 +890,12 @@
     async function appendPathsToActivePlaylist(paths) {
       const active = getActivePlaylist();
       if (!active || !Array.isArray(paths) || !paths.length) return;
+      const existingPaths = new Set(active.items.map(item => normalizePath(item.path || '')).filter(isLikelyFilePath));
       const addedIds = new Set();
       for (const raw of paths) {
         const cleaned = normalizePath(raw);
-        if (!cleaned) continue;
+        if (!isLikelyFilePath(cleaned)) continue;
+        if (existingPaths.has(cleaned)) continue;
         const id = generateId('item');
         const item = {
           id,
@@ -925,6 +904,7 @@
         };
         active.items.push(item);
         addedIds.add(id);
+        existingPaths.add(cleaned);
       }
       if (!addedIds.size) return;
       selectedItemIds.clear();
@@ -1029,7 +1009,7 @@
             id: item.id || generateId('item'),
             path: normalizePath(item.path || ''),
             duration: Number.isFinite(item.duration) ? item.duration : null
-          })).filter(item => item.path) : [];
+          })).filter(item => isLikelyFilePath(item.path)) : [];
           playlists.push({
             id: pl.id || generateId('pl'),
             name: pl.name || 'Playlist',
@@ -1047,7 +1027,7 @@
             id: generateId('item'),
             path: normalizePath(item?.path || ''),
             duration: Number.isFinite(item?.duration) ? item.duration : null
-          })).filter(item => item.path)
+          })).filter(item => isLikelyFilePath(item.path))
         });
         convertedLegacy = true;
       }
@@ -1325,7 +1305,7 @@
       e.stopPropagation();
       playlistList.classList.remove('dragover');
       try {
-        const paths = await extractPathsFromDataTransfer(e.dataTransfer);
+        const paths = extractPathsFromDataTransfer(e.dataTransfer);
         if (paths.length) {
           await appendPathsToActivePlaylist(paths);
         }
@@ -1367,7 +1347,7 @@
         moveSelectionToTargetNode(null);
         return;
       }
-      const paths = await extractPathsFromDataTransfer(e.dataTransfer);
+      const paths = extractPathsFromDataTransfer(e.dataTransfer);
       if (paths.length) {
         await appendPathsToActivePlaylist(paths);
       }
