@@ -450,7 +450,11 @@
         if (!dt) return false;
         if (dt.files && dt.files.length) return true;
         const types = Array.from(dt.types || []);
-        return types.includes('Files') || types.includes('public.file-url') || types.includes('text/uri-list') || types.includes('text/plain');
+        return types.includes('Files') ||
+          types.includes('public.file-url') ||
+          types.includes('text/uri-list') ||
+          types.includes('text/plain') ||
+          types.includes('NSFilenamesPboardType');
       }
 
       function handleDrop(e) {
@@ -512,51 +516,91 @@
           .map(line => cleanPath(line));
       }
 
-      function looksLikeFilenameOnly(value) {
-        return typeof value === 'string' && value.length > 0 && !/[\\/]/.test(value) && !value.startsWith('file://');
-      }
-
       function extractDropPaths(dataTransfer) {
         if (!dataTransfer) {
           return [];
         }
 
+        const rawCandidates = [];
+        const addCandidates = values => {
+          if (!values) return;
+          if (!Array.isArray(values)) {
+            values = [values];
+          }
+          values.forEach(value => {
+            if (typeof value === 'string' && value.trim().length) {
+              rawCandidates.push(value);
+            }
+          });
+        };
+
         const files = Array.from(dataTransfer.files || []);
-        let paths = files.map(file => file.path || file.name).filter(Boolean);
+        addCandidates(files.map(file => file.path || file.name));
 
-        if (!paths.length || paths.every(looksLikeFilenameOnly)) {
-          const uriList = dataTransfer.getData('text/uri-list');
-          if (uriList) {
-            const uriPaths = parseUriList(uriList);
-            if (uriPaths.length) {
-              paths = uriPaths;
+        const parsePlainList = input => input.split(/[\r\n]+/)
+          .map(line => line.trim())
+          .filter(Boolean);
+
+        const isLikelyAbsolute = value => {
+          if (!value) return false;
+          if (value.startsWith('file://')) return true;
+          if (value.startsWith('/') || value.startsWith('\\\\')) return true;
+          return /^[A-Za-z]:[\\/]/.test(value);
+        };
+
+        const dataParsers = [
+          { type: 'text/uri-list', parser: parseUriList },
+          { type: 'public.file-url', parser: parseUriList },
+          { type: 'Files', parser: parseUriList },
+          {
+            type: 'NSFilenamesPboardType',
+            parser: value => {
+              try {
+                const parsed = JSON.parse(value);
+                if (Array.isArray(parsed)) {
+                  return parsed.map(item => cleanPath(item)).filter(Boolean);
+                }
+              } catch (err) {
+                // Finder sometimes provides a property list style string.
+              }
+              const matches = [];
+              value.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, (_m, match) => {
+                matches.push(cleanPath(match));
+              });
+              if (matches.length) {
+                return matches.filter(Boolean);
+              }
+              return parsePlainList(value).map(item => cleanPath(item));
             }
+          },
+          { type: 'text/plain', parser: value => parsePlainList(value).map(item => cleanPath(item)) }
+        ];
+
+        for (const { type, parser } of dataParsers) {
+          try {
+            const payload = dataTransfer.getData(type);
+            if (payload) {
+              addCandidates(parser(payload));
+            }
+          } catch (err) {
+            console.warn('Failed to read drop payload type', type, err);
           }
         }
 
-        if (!paths.length || paths.every(looksLikeFilenameOnly)) {
-          const publicUrl = dataTransfer.getData('public.file-url');
-          if (publicUrl) {
-            const fileUrlPaths = parseUriList(publicUrl);
-            if (fileUrlPaths.length) {
-              paths = fileUrlPaths;
-            }
-          }
+        const cleaned = Array.from(new Set(rawCandidates
+          .map(candidate => cleanPath(candidate))
+          .filter(Boolean)));
+
+        if (!cleaned.length) {
+          return [];
         }
 
-        if (!paths.length || paths.every(looksLikeFilenameOnly)) {
-          const plain = dataTransfer.getData('text/plain');
-          if (plain) {
-            const plainPaths = plain.split('\n')
-              .map(line => cleanPath(line))
-              .filter(Boolean);
-            if (plainPaths.length) {
-              paths = plainPaths;
-            }
-          }
+        const hasAbsolute = cleaned.some(isLikelyAbsolute);
+        if (hasAbsolute) {
+          return cleaned.filter(isLikelyAbsolute);
         }
 
-        return paths;
+        return cleaned;
       }
 
       function handleExternalDrop(e) {
