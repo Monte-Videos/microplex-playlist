@@ -1145,17 +1145,19 @@
 
       function hasExternalPayload(dt) {
         if (!dt) return false;
+        const items = Array.from(dt.items || []);
+        if (items.some(item => item.kind === 'file')) {
+          return true;
+        }
         if (dt.files && dt.files.length) return true;
-        const types = Array.from(dt.types || []);
-        return types.includes('Files') ||
-          types.includes('public.file-url') ||
-          types.includes('text/uri-list') ||
-          types.includes('text/plain') ||
-          types.includes('public.url') ||
-          types.includes('public.utf8-plain-text') ||
-          types.includes('com.apple.pasteboard.promised-file-url') ||
-          types.includes('CorePasteboardFlavorType 0x75726C20') ||
-          types.includes('NSFilenamesPboardType');
+        const types = new Set(dt.types || []);
+        return types.has('Files') ||
+          types.has('public.file-url') ||
+          types.has('text/uri-list') ||
+          types.has('public.url') ||
+          types.has('com.apple.pasteboard.promised-file-url') ||
+          types.has('CorePasteboardFlavorType 0x75726C20') ||
+          types.has('NSFilenamesPboardType');
       }
 
       async function handleDrop(e) {
