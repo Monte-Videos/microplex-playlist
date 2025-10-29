@@ -39,6 +39,16 @@ ipcMain.handle('mediaTools:select-files', async () => {
   return filePaths;
 });
 
+ipcMain.handle('mediaTools:select-folder', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    properties: ['openDirectory']
+  });
+  if (canceled || !Array.isArray(filePaths) || !filePaths.length) {
+    return null;
+  }
+  return filePaths[0];
+});
+
 ipcMain.handle('mediaTools:get-duration', async (_event, filePath) => {
   if (!filePath) {
     return null;
@@ -70,6 +80,27 @@ ipcMain.handle('mediaTools:load-data', (_event, key) => {
     return null;
   }
   return settingsStore.get(key, null);
+});
+
+ipcMain.handle('mediaTools:read-directory', async (_event, dirPath) => {
+  if (!dirPath || typeof dirPath !== 'string') {
+    return [];
+  }
+
+  try {
+    const entries = await fs.readdir(dirPath, { withFileTypes: true });
+    return entries.map(entry => {
+      const entryPath = path.join(dirPath, entry.name);
+      return {
+        name: entry.name,
+        path: entryPath,
+        isDirectory: entry.isDirectory()
+      };
+    });
+  } catch (err) {
+    console.warn('Failed to read directory', dirPath, err);
+    return [];
+  }
 });
 
 function fromFinderColonPath(value) {

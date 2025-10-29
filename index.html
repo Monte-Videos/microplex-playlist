@@ -10,11 +10,18 @@
       background: #eceff1;
       color: #1b1f23;
     }
-    .layout {
-      max-width: 960px;
+    .app-shell {
+      max-width: 1200px;
       margin: 2em auto 3em;
       padding: 0 1.5em;
       display: grid;
+      gap: 1.5em;
+      grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+      align-items: start;
+    }
+    .layout {
+      display: flex;
+      flex-direction: column;
       gap: 1.5em;
     }
     .card {
@@ -25,6 +32,136 @@
       display: flex;
       flex-direction: column;
       gap: 0.75em;
+    }
+    .sidebar {
+      position: sticky;
+      top: 2em;
+      align-self: start;
+      gap: 1em;
+    }
+    .sidebar .section-header {
+      margin-bottom: 0.5em;
+    }
+    .pinned-folder-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75em;
+    }
+    .pinned-folder-empty {
+      list-style: none;
+      padding: 0.25em 0;
+      color: #607d8b;
+      font-size: 0.9em;
+    }
+    .pinned-folder {
+      border: 1px solid #cfd8dc;
+      border-radius: 10px;
+      padding: 0.75em;
+      display: flex;
+      flex-direction: column;
+      gap: 0.6em;
+      background: #f8fafc;
+    }
+    .pinned-folder-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5em;
+      font-weight: 600;
+      color: #263238;
+    }
+    .pinned-folder-header button {
+      font-size: 0.85em;
+      padding: 0.35em 0.65em;
+    }
+    .pinned-folder-toggle {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 0.5em;
+      background: transparent;
+      border: none;
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+      padding: 0;
+      font-size: 1em;
+    }
+    .pinned-folder-toggle:hover {
+      color: #1565c0;
+    }
+    .pinned-folder-title {
+      flex: 1;
+      word-break: break-word;
+    }
+    .folder-path {
+      font-size: 0.8em;
+      color: #607d8b;
+      word-break: break-all;
+    }
+    .folder-contents {
+      display: none;
+      flex-direction: column;
+      gap: 0.5em;
+    }
+    .folder-contents.expanded {
+      display: flex;
+    }
+    .folder-breadcrumbs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35em;
+      font-size: 0.85em;
+      color: #37474f;
+    }
+    .folder-breadcrumbs button {
+      background: transparent;
+      border: none;
+      color: #1e88e5;
+      cursor: pointer;
+      padding: 0;
+      font-size: 1em;
+    }
+    .folder-items {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25em;
+      max-height: 280px;
+      overflow: auto;
+    }
+    .folder-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5em;
+      padding: 0.35em 0.5em;
+      border-radius: 6px;
+      cursor: pointer;
+      color: #37474f;
+    }
+    .folder-item:hover {
+      background: #e3f2fd;
+    }
+    .folder-item.directory {
+      font-weight: 600;
+    }
+    .folder-item.selected {
+      background: #bbdefb;
+      color: #0d47a1;
+    }
+    .folder-item-label {
+      flex: 1;
+      word-break: break-word;
+    }
+    .folder-item-meta {
+      font-size: 0.75em;
+      color: #607d8b;
     }
     h2, h3 {
       margin: 0;
@@ -161,10 +298,91 @@
     #connStatus {
       font-weight: 600;
     }
+    .drop-disabled {
+      font-size: 0.85em;
+      color: #c62828;
+    }
+    .preview-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.75);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.2s ease;
+      z-index: 1000;
+    }
+    .preview-overlay.visible {
+      opacity: 1;
+      visibility: visible;
+    }
+    .preview-content {
+      background: #0f172a;
+      border-radius: 14px;
+      padding: 1.25em;
+      max-width: 80vw;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75em;
+      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.45);
+    }
+    .preview-close {
+      align-self: flex-end;
+      background: rgba(255, 255, 255, 0.15);
+      border: none;
+      color: #fff;
+      font-size: 1.1em;
+      border-radius: 6px;
+      padding: 0.35em 0.7em;
+      cursor: pointer;
+    }
+    .preview-body {
+      flex: 1;
+      min-width: 320px;
+      min-height: 200px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .preview-body video,
+    .preview-body audio,
+    .preview-body img {
+      max-width: 100%;
+      max-height: 70vh;
+      border-radius: 10px;
+    }
+    .preview-fallback {
+      color: #e0f2f1;
+      font-size: 0.95em;
+      text-align: center;
+    }
+    @media (max-width: 960px) {
+      .app-shell {
+        grid-template-columns: 1fr;
+      }
+      .sidebar {
+        position: static;
+      }
+    }
   </style>
 </head>
 <body>
-  <main class="layout">
+  <main class="app-shell">
+    <aside class="card sidebar">
+      <header class="section-header">
+        <h3>Pinned Folders</h3>
+        <div class="section-tools">
+          <button id="addFolderBtn" class="primary">Pin Folder…</button>
+        </div>
+      </header>
+      <p class="helper-text">Browse frequently used folders, double-click files to add them to the playlist, and press the spacebar to preview supported media.</p>
+      <ul id="pinnedFolderList" class="pinned-folder-list"></ul>
+      <p class="helper-text drop-disabled">Finder drag-and-drop is temporarily disabled while the file browser is in development.</p>
+    </aside>
+    <div class="layout">
     <section class="card">
       <h2>OBS Playlist POC</h2>
       <label class="field">OBS WebSocket URL:
@@ -187,7 +405,7 @@
           <input type="file" id="fileInput" multiple hidden>
         </div>
       </header>
-      <p class="helper-text">Drop Finder files anywhere in this list or use Add Files to build the playlist. Drag to reorder, double-click to remove.</p>
+      <p class="helper-text">Use the Add Files button or the pinned folders to build the playlist. Drag to reorder, double-click to remove.</p>
       <ul id="playlistList" class="playlist"></ul>
       <div class="inline-actions">
         <button id="playBtn">Play</button>
@@ -209,7 +427,14 @@
       <h3>Status</h3>
       <div id="status" class="status-log"></div>
     </section>
+    </div>
   </main>
+  <div id="previewOverlay" class="preview-overlay" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="preview-content">
+      <button id="previewCloseBtn" class="preview-close" aria-label="Close preview">×</button>
+      <div id="previewBody" class="preview-body"></div>
+    </div>
+  </div>
 
   <script>
     window.addEventListener('DOMContentLoaded', () => {
@@ -225,8 +450,13 @@
       const scheduleInput = document.getElementById('scheduleTime');
       const statusEl = document.getElementById('status');
       const connStatusEl = document.getElementById('connStatus');
+      const addFolderBtn = document.getElementById('addFolderBtn');
+      const pinnedFolderList = document.getElementById('pinnedFolderList');
+      const previewOverlay = document.getElementById('previewOverlay');
+      const previewBody = document.getElementById('previewBody');
+      const previewCloseBtn = document.getElementById('previewCloseBtn');
 
-      if (!wsUrlInput || !mediaSourceInput || !playlistList || !addFileBtn || !fileInput || !connectBtn || !playBtn || !streamBtn || !scheduleBtn || !scheduleInput || !statusEl || !connStatusEl) {
+      if (!wsUrlInput || !mediaSourceInput || !playlistList || !addFileBtn || !fileInput || !connectBtn || !playBtn || !streamBtn || !scheduleBtn || !scheduleInput || !statusEl || !connStatusEl || !addFolderBtn || !pinnedFolderList || !previewOverlay || !previewBody || !previewCloseBtn) {
         console.error('Playlist UI failed to initialize: missing required elements');
         return;
       }
@@ -239,6 +469,15 @@
       let requestCounter = 1;
       let poller = null;
       let scheduleTimeout = null;
+      const pinnedFolders = [];
+      const pinnedState = new Map();
+      let selectedBrowserItem = null;
+      const previewState = { isOpen: false };
+      const previewSupport = {
+        video: new Set(['mp4', 'mov', 'm4v', 'mkv', 'webm']),
+        audio: new Set(['mp3', 'wav', 'aif', 'aiff', 'flac', 'ogg', 'm4a']),
+        image: new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'])
+      };
 
       function fileUrlToPath(value) {
         if (!value || typeof value !== 'string') return value;
@@ -301,13 +540,6 @@
         return !/[/\\]/.test(value);
       }
 
-      function isLikelyAbsolute(value) {
-        if (!value) return false;
-        if (value.startsWith('file://')) return true;
-        if (value.startsWith('/') || value.startsWith('\\\\')) return true;
-        return /^[A-Za-z]:[\\/]/.test(value);
-      }
-
       function formatTime(seconds) {
         if (seconds == null || isNaN(seconds)) return '--:--';
         const h = Math.floor(seconds / 3600);
@@ -344,6 +576,431 @@
       function setConnStatus(msg, color = 'black') {
         connStatusEl.textContent = msg;
         connStatusEl.style.color = color;
+      }
+
+      function clearSelectedBrowserItem() {
+        if (selectedBrowserItem && selectedBrowserItem.element) {
+          selectedBrowserItem.element.classList.remove('selected');
+        }
+        selectedBrowserItem = null;
+        if (previewState.isOpen) {
+          closePreview();
+        }
+      }
+
+      function selectBrowserItem(element) {
+        if (!element) {
+          return;
+        }
+        if (selectedBrowserItem && selectedBrowserItem.element === element) {
+          return;
+        }
+        if (selectedBrowserItem && selectedBrowserItem.element) {
+          selectedBrowserItem.element.classList.remove('selected');
+        }
+        element.classList.add('selected');
+        selectedBrowserItem = { element, entry: element.__entry };
+        if (previewState.isOpen && selectedBrowserItem.entry && !selectedBrowserItem.entry.isDirectory) {
+          openPreview(selectedBrowserItem.entry);
+        }
+      }
+
+      function closePreview() {
+        if (!previewOverlay || !previewBody) {
+          return;
+        }
+        previewOverlay.classList.remove('visible');
+        previewOverlay.setAttribute('aria-hidden', 'true');
+        previewBody.innerHTML = '';
+        previewState.isOpen = false;
+        if (selectedBrowserItem && selectedBrowserItem.element && typeof selectedBrowserItem.element.focus === 'function') {
+          selectedBrowserItem.element.focus({ preventScroll: true });
+        }
+      }
+
+      function openPreview(entry) {
+        if (!entry || entry.isDirectory || !previewOverlay || !previewBody) {
+          return;
+        }
+        const fileUrl = window.mediaTools && typeof window.mediaTools.toFileUrl === 'function'
+          ? window.mediaTools.toFileUrl(entry.path)
+          : '';
+
+        previewBody.innerHTML = '';
+        let previewEl = null;
+        const extension = (entry.name.split('.').pop() || '').toLowerCase();
+
+        if (fileUrl) {
+          if (previewSupport.video.has(extension)) {
+            const video = document.createElement('video');
+            video.src = fileUrl;
+            video.controls = true;
+            video.autoplay = true;
+            video.loop = true;
+            video.style.background = '#000';
+            previewEl = video;
+          } else if (previewSupport.audio.has(extension)) {
+            const audio = document.createElement('audio');
+            audio.src = fileUrl;
+            audio.controls = true;
+            audio.autoplay = true;
+            previewEl = audio;
+          } else if (previewSupport.image.has(extension)) {
+            const img = document.createElement('img');
+            img.src = fileUrl;
+            img.alt = entry.name;
+            previewEl = img;
+          }
+        }
+
+        if (!previewEl) {
+          const fallback = document.createElement('div');
+          fallback.className = 'preview-fallback';
+          const fallbackMsg = document.createElement('p');
+          fallbackMsg.textContent = 'Preview not available.';
+          const fallbackPath = document.createElement('p');
+          fallbackPath.textContent = entry.path;
+          fallback.appendChild(fallbackMsg);
+          fallback.appendChild(fallbackPath);
+          previewEl = fallback;
+        }
+
+        previewBody.appendChild(previewEl);
+        previewOverlay.classList.add('visible');
+        previewOverlay.setAttribute('aria-hidden', 'false');
+        previewState.isOpen = true;
+        if (previewCloseBtn && typeof previewCloseBtn.focus === 'function') {
+          previewCloseBtn.focus({ preventScroll: true });
+        }
+      }
+
+      function buildBreadcrumbs(rootPath, targetPath) {
+        if (!window.mediaTools) {
+          return [];
+        }
+        const breadcrumbs = [];
+        const visited = new Set();
+        let current = targetPath;
+        while (current && !visited.has(current)) {
+          visited.add(current);
+          const label = window.mediaTools.basename(current) || current;
+          breadcrumbs.unshift({ label, path: current });
+          if (current === rootPath) {
+            break;
+          }
+          const parent = window.mediaTools.dirname(current);
+          if (!parent || parent === current) {
+            break;
+          }
+          current = parent;
+        }
+        if (!breadcrumbs.length && rootPath) {
+          breadcrumbs.push({ label: window.mediaTools.basename(rootPath) || rootPath, path: rootPath });
+        }
+        return breadcrumbs;
+      }
+
+      async function populateFolderContents(rootPath, targetPath, container) {
+        if (!container) {
+          return;
+        }
+
+        const state = pinnedState.get(rootPath) || { expanded: true, currentPath: rootPath };
+        state.currentPath = targetPath;
+        pinnedState.set(rootPath, state);
+
+        clearSelectedBrowserItem();
+        container.innerHTML = '';
+
+        const breadcrumbs = buildBreadcrumbs(rootPath, targetPath);
+        if (breadcrumbs.length) {
+          const crumbsEl = document.createElement('div');
+          crumbsEl.className = 'folder-breadcrumbs';
+
+          breadcrumbs.forEach((crumb, index) => {
+            if (index < breadcrumbs.length - 1) {
+              const btn = document.createElement('button');
+              btn.type = 'button';
+              btn.textContent = crumb.label;
+              btn.addEventListener('click', () => {
+                populateFolderContents(rootPath, crumb.path, container);
+              });
+              crumbsEl.appendChild(btn);
+              const sep = document.createElement('span');
+              sep.textContent = '›';
+              crumbsEl.appendChild(sep);
+            } else {
+              const span = document.createElement('span');
+              span.textContent = crumb.label;
+              crumbsEl.appendChild(span);
+            }
+          });
+
+          container.appendChild(crumbsEl);
+        }
+
+        const itemsList = document.createElement('ul');
+        itemsList.className = 'folder-items';
+        container.appendChild(itemsList);
+
+        if (!window.mediaTools || typeof window.mediaTools.readDirectory !== 'function') {
+          const fallbackItem = document.createElement('li');
+          fallbackItem.className = 'folder-item';
+          fallbackItem.textContent = 'File browser is unavailable in this environment.';
+          fallbackItem.style.justifyContent = 'center';
+          fallbackItem.style.fontStyle = 'italic';
+          fallbackItem.tabIndex = -1;
+          itemsList.appendChild(fallbackItem);
+          return;
+        }
+
+        let entries = [];
+        try {
+          entries = await window.mediaTools.readDirectory(targetPath);
+        } catch (err) {
+          console.warn('readDirectory failed', err);
+          setStatus('Unable to read folder contents.');
+        }
+
+        if (!Array.isArray(entries)) {
+          entries = [];
+        }
+
+        entries.sort((a, b) => {
+          if (a.isDirectory !== b.isDirectory) {
+            return a.isDirectory ? -1 : 1;
+          }
+          return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+        });
+
+        if (!entries.length) {
+          const emptyItem = document.createElement('li');
+          emptyItem.className = 'folder-item';
+          emptyItem.textContent = 'No items in this folder.';
+          emptyItem.style.justifyContent = 'center';
+          emptyItem.style.fontStyle = 'italic';
+          emptyItem.style.color = '#90a4ae';
+          emptyItem.tabIndex = -1;
+          itemsList.appendChild(emptyItem);
+          return;
+        }
+
+        entries.forEach(entry => {
+          const item = document.createElement('li');
+          item.className = 'folder-item';
+          if (entry.isDirectory) {
+            item.classList.add('directory');
+          }
+          item.dataset.path = entry.path;
+          item.dataset.type = entry.isDirectory ? 'directory' : 'file';
+          item.tabIndex = 0;
+
+          const label = document.createElement('span');
+          label.className = 'folder-item-label';
+          label.textContent = entry.name;
+          item.appendChild(label);
+
+          const meta = document.createElement('span');
+          meta.className = 'folder-item-meta';
+          meta.textContent = entry.isDirectory ? 'Folder' : 'File';
+          item.appendChild(meta);
+
+          item.__entry = entry;
+
+          item.addEventListener('click', event => {
+            event.stopPropagation();
+            selectBrowserItem(item);
+          });
+
+          item.addEventListener('dblclick', event => {
+            event.stopPropagation();
+            selectBrowserItem(item);
+            if (entry.isDirectory) {
+              populateFolderContents(rootPath, entry.path, container);
+            } else {
+              addToPlaylist([entry.path]);
+              setStatus(`Added ${entry.name} to the playlist.`);
+            }
+          });
+
+          item.addEventListener('keydown', event => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              if (entry.isDirectory) {
+                populateFolderContents(rootPath, entry.path, container);
+              } else {
+                addToPlaylist([entry.path]);
+                setStatus(`Added ${entry.name} to the playlist.`);
+              }
+            }
+          });
+
+          itemsList.appendChild(item);
+        });
+      }
+
+      async function savePinnedFolders() {
+        if (!window.mediaTools || typeof window.mediaTools.saveData !== 'function') {
+          return;
+        }
+        try {
+          await window.mediaTools.saveData('pinnedFolders', pinnedFolders);
+        } catch (err) {
+          console.warn('savePinnedFolders failed', err);
+        }
+      }
+
+      function renderPinnedFolders() {
+        if (!pinnedFolderList) {
+          return;
+        }
+        clearSelectedBrowserItem();
+        pinnedFolderList.innerHTML = '';
+
+        if (!pinnedFolders.length) {
+          const empty = document.createElement('li');
+          empty.className = 'pinned-folder-empty';
+          empty.textContent = 'No folders pinned yet. Use “Pin Folder…” to get started.';
+          pinnedFolderList.appendChild(empty);
+          return;
+        }
+
+        pinnedFolders.forEach(folderPath => {
+          const state = pinnedState.get(folderPath) || { expanded: false, currentPath: folderPath };
+          pinnedState.set(folderPath, state);
+
+          const listItem = document.createElement('li');
+          listItem.className = 'pinned-folder';
+          listItem.dataset.path = folderPath;
+
+          const header = document.createElement('div');
+          header.className = 'pinned-folder-header';
+
+          const toggleBtn = document.createElement('button');
+          toggleBtn.type = 'button';
+          toggleBtn.className = 'pinned-folder-toggle';
+          toggleBtn.setAttribute('aria-expanded', state.expanded ? 'true' : 'false');
+
+          const chevron = document.createElement('span');
+          chevron.textContent = state.expanded ? '▾' : '▸';
+          const title = document.createElement('span');
+          title.className = 'pinned-folder-title';
+          title.textContent = window.mediaTools && typeof window.mediaTools.basename === 'function'
+            ? (window.mediaTools.basename(folderPath) || folderPath)
+            : folderPath;
+
+          toggleBtn.appendChild(chevron);
+          toggleBtn.appendChild(title);
+
+          toggleBtn.addEventListener('click', () => {
+            state.expanded = !state.expanded;
+            toggleBtn.setAttribute('aria-expanded', state.expanded ? 'true' : 'false');
+            chevron.textContent = state.expanded ? '▾' : '▸';
+            if (state.expanded) {
+              contents.classList.add('expanded');
+              populateFolderContents(folderPath, state.currentPath || folderPath, contents);
+            } else {
+              contents.classList.remove('expanded');
+              if (selectedBrowserItem && contents.contains(selectedBrowserItem.element)) {
+                clearSelectedBrowserItem();
+              }
+            }
+          });
+
+          header.appendChild(toggleBtn);
+
+          const removeBtn = document.createElement('button');
+          removeBtn.type = 'button';
+          removeBtn.textContent = 'Remove';
+          removeBtn.addEventListener('click', async event => {
+            event.stopPropagation();
+            await removePinnedFolder(folderPath);
+          });
+          header.appendChild(removeBtn);
+
+          listItem.appendChild(header);
+
+          const pathLabel = document.createElement('div');
+          pathLabel.className = 'folder-path';
+          pathLabel.textContent = folderPath;
+          listItem.appendChild(pathLabel);
+
+          const contents = document.createElement('div');
+          contents.className = 'folder-contents';
+          listItem.appendChild(contents);
+
+          if (state.expanded) {
+            contents.classList.add('expanded');
+            populateFolderContents(folderPath, state.currentPath || folderPath, contents);
+          }
+
+          pinnedFolderList.appendChild(listItem);
+        });
+      }
+
+      async function addPinnedFolder(folderPath, options = {}) {
+        if (!folderPath || typeof folderPath !== 'string') {
+          return;
+        }
+        const normalized = folderPath.trim();
+        if (!normalized) {
+          return;
+        }
+        if (pinnedFolders.includes(normalized)) {
+          if (!options.silent) {
+            setStatus('Folder is already pinned.');
+          }
+          return;
+        }
+        pinnedFolders.push(normalized);
+        pinnedState.set(normalized, { expanded: true, currentPath: normalized });
+        renderPinnedFolders();
+        await savePinnedFolders();
+        if (!options.silent) {
+          setStatus('Folder pinned.');
+        }
+      }
+
+      async function removePinnedFolder(folderPath) {
+        const idx = pinnedFolders.indexOf(folderPath);
+        if (idx === -1) {
+          return;
+        }
+        pinnedFolders.splice(idx, 1);
+        pinnedState.delete(folderPath);
+        if (selectedBrowserItem && selectedBrowserItem.entry) {
+          const entryPath = (selectedBrowserItem.entry.path || '').replace(/[\\/]+$/, '');
+          const normalizedFolder = folderPath.replace(/[\\/]+$/, '');
+          if (entryPath === normalizedFolder || entryPath.startsWith(`${normalizedFolder}/`) || entryPath.startsWith(`${normalizedFolder}\\`)) {
+            clearSelectedBrowserItem();
+          }
+        }
+        renderPinnedFolders();
+        await savePinnedFolders();
+        setStatus('Folder removed from pins.');
+      }
+
+      async function loadPinnedFolders() {
+        if (!window.mediaTools || typeof window.mediaTools.loadData !== 'function') {
+          renderPinnedFolders();
+          return;
+        }
+        try {
+          const stored = await window.mediaTools.loadData('pinnedFolders');
+          if (Array.isArray(stored)) {
+            const filtered = stored.filter(item => typeof item === 'string' && item.trim().length);
+            const unique = Array.from(new Set(filtered));
+            pinnedFolders.splice(0, pinnedFolders.length, ...unique);
+            pinnedFolders.forEach(pathValue => {
+              if (!pinnedState.has(pathValue)) {
+                pinnedState.set(pathValue, { expanded: false, currentPath: pathValue });
+              }
+            });
+          }
+        } catch (err) {
+          console.warn('loadPinnedFolders failed', err);
+        }
+        renderPinnedFolders();
       }
 
       function updateStartEndTimes() {
@@ -488,17 +1145,19 @@
 
       function hasExternalPayload(dt) {
         if (!dt) return false;
+        const items = Array.from(dt.items || []);
+        if (items.some(item => item.kind === 'file')) {
+          return true;
+        }
         if (dt.files && dt.files.length) return true;
-        const types = Array.from(dt.types || []);
-        return types.includes('Files') ||
-          types.includes('public.file-url') ||
-          types.includes('text/uri-list') ||
-          types.includes('text/plain') ||
-          types.includes('public.url') ||
-          types.includes('public.utf8-plain-text') ||
-          types.includes('com.apple.pasteboard.promised-file-url') ||
-          types.includes('CorePasteboardFlavorType 0x75726C20') ||
-          types.includes('NSFilenamesPboardType');
+        const types = new Set(dt.types || []);
+        return types.has('Files') ||
+          types.has('public.file-url') ||
+          types.has('text/uri-list') ||
+          types.has('public.url') ||
+          types.has('com.apple.pasteboard.promised-file-url') ||
+          types.has('CorePasteboardFlavorType 0x75726C20') ||
+          types.has('NSFilenamesPboardType');
       }
 
       async function handleDrop(e) {
@@ -685,21 +1344,13 @@
         e.preventDefault();
         e.stopPropagation();
         playlistList.classList.remove('dragover');
-        try {
-          const paths = await extractDropPaths(e.dataTransfer);
-          if (paths.length) {
-            await addToPlaylist(paths);
-          } else {
-            setStatus('Dropped files could not be read. Please try again or use Add Files…');
-          }
-        } catch (err) {
-          console.warn('Failed to handle external drop', err);
-        }
+        setStatus('Finder drag-and-drop is temporarily disabled. Please use Pin Folder or Add Files…');
       }
 
       playlistList.addEventListener('dragover', e => {
         e.preventDefault();
         playlistList.classList.add('dragover');
+        setStatus('Finder drag-and-drop is temporarily disabled. Please use Pin Folder or Add Files…');
       });
 
       playlistList.addEventListener('dragleave', () => {
@@ -836,6 +1487,22 @@
         });
       });
 
+      addFolderBtn.addEventListener('click', async () => {
+        if (!window.mediaTools || typeof window.mediaTools.selectFolder !== 'function') {
+          setStatus('Folder selection is unavailable in this environment.');
+          return;
+        }
+        try {
+          const folderPath = await window.mediaTools.selectFolder();
+          if (folderPath) {
+            await addPinnedFolder(folderPath);
+          }
+        } catch (err) {
+          console.warn('selectFolder failed', err);
+          setStatus('Unable to pin folder.');
+        }
+      });
+
       addFileBtn.addEventListener('click', async () => {
         let selected = [];
 
@@ -889,6 +1556,39 @@
       mediaSourceInput.addEventListener('input', saveSettings);
       scheduleInput.addEventListener('input', saveSettings);
 
+      previewCloseBtn.addEventListener('click', () => {
+        closePreview();
+      });
+
+      previewOverlay.addEventListener('click', event => {
+        if (event.target === previewOverlay) {
+          closePreview();
+        }
+      });
+
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && previewState.isOpen) {
+          event.preventDefault();
+          closePreview();
+          return;
+        }
+        if (event.code === 'Space' || event.key === ' ') {
+          const targetTag = event.target && event.target.tagName;
+          if (targetTag && ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(targetTag)) {
+            return;
+          }
+          if (previewState.isOpen) {
+            event.preventDefault();
+            closePreview();
+            return;
+          }
+          if (selectedBrowserItem && selectedBrowserItem.entry && !selectedBrowserItem.entry.isDirectory) {
+            event.preventDefault();
+            openPreview(selectedBrowserItem.entry);
+          }
+        }
+      });
+
       async function loadSettings() {
         if (!window.mediaTools) return;
         try {
@@ -915,6 +1615,7 @@
         }
       }
 
+      loadPinnedFolders();
       loadSettings();
     });
   </script>
