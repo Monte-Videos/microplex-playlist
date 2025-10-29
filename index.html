@@ -301,6 +301,13 @@
         return !/[/\\]/.test(value);
       }
 
+      function isLikelyAbsolute(value) {
+        if (!value) return false;
+        if (value.startsWith('file://')) return true;
+        if (value.startsWith('/') || value.startsWith('\\\\')) return true;
+        return /^[A-Za-z]:[\\/]/.test(value);
+      }
+
       function formatTime(seconds) {
         if (seconds == null || isNaN(seconds)) return '--:--';
         const h = Math.floor(seconds / 3600);
