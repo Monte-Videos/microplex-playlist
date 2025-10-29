@@ -43,7 +43,7 @@
   <h2>OBS Playlist POC</h2>
   <div>
     <label>OBS WebSocket URL:<br>
-      <input type="text" id="wsUrl" value="ws://localhost:4455" style="width: 100%;">
+      <input type="text" id="wsUrl" value="ws://the-microplex:4455" style="width: 100%;">
     </label>
     <button id="connectBtn">Connect</button>
     <span id="connStatus">Not connected</span>
@@ -84,26 +84,40 @@
     let scheduleTimeout = null;
 
     // --- Persistence ---
-    function saveSettings() {
+    async function saveSettings() {
       if (!window.mediaTools) return;
-      window.mediaTools.saveData('wsUrl', document.getElementById('wsUrl').value);
-      window.mediaTools.saveData('mediaSource', document.getElementById('mediaSource').value);
-      window.mediaTools.saveData('playlist', getPlaylistData());
-      window.mediaTools.saveData('scheduleTime', document.getElementById('scheduleTime').value);
-    }
-    function loadSettings() {
-      if (!window.mediaTools) return;
-      const wsUrl = window.mediaTools.loadData('wsUrl');
-      if (wsUrl) document.getElementById('wsUrl').value = wsUrl;
-      const mediaSource = window.mediaTools.loadData('mediaSource');
-      if (mediaSource) document.getElementById('mediaSource').value = mediaSource;
-      const playlistData = window.mediaTools.loadData('playlist');
-      if (playlistData && Array.isArray(playlistData)) {
-        playlistList.innerHTML = '';
-        playlistData.forEach(item => addToPlaylist([item.path], item.duration));
+      try {
+        await Promise.all([
+          window.mediaTools.saveData('wsUrl', document.getElementById('wsUrl').value),
+          window.mediaTools.saveData('mediaSource', document.getElementById('mediaSource').value),
+          window.mediaTools.saveData('playlist', getPlaylistData()),
+          window.mediaTools.saveData('scheduleTime', document.getElementById('scheduleTime').value)
+        ]);
+      } catch (err) {
+        console.warn('saveSettings failed', err);
       }
-      const scheduleTime = window.mediaTools.loadData('scheduleTime');
-      if (scheduleTime) document.getElementById('scheduleTime').value = scheduleTime;
+    }
+    async function loadSettings() {
+      if (!window.mediaTools) return;
+      try {
+        const [wsUrl, mediaSource, playlistData, scheduleTime] = await Promise.all([
+          window.mediaTools.loadData('wsUrl'),
+          window.mediaTools.loadData('mediaSource'),
+          window.mediaTools.loadData('playlist'),
+          window.mediaTools.loadData('scheduleTime')
+        ]);
+        if (wsUrl) document.getElementById('wsUrl').value = wsUrl;
+        if (mediaSource) document.getElementById('mediaSource').value = mediaSource;
+        if (Array.isArray(playlistData)) {
+          playlistList.innerHTML = '';
+          for (const item of playlistData) {
+            await addToPlaylist([item.path], item.duration, { skipSave: true });
+          }
+        }
+        if (scheduleTime) document.getElementById('scheduleTime').value = scheduleTime;
+      } catch (err) {
+        console.warn('loadSettings failed', err);
+      }
     }
 
     // --- Playlist + Duration + Start/End ---
@@ -129,13 +143,21 @@
     function getMediaSource() {
       return document.getElementById('mediaSource').value.trim();
     }
-    async function addToPlaylist(paths, durationOverride) {
+    async function addToPlaylist(paths, durationOverride, options = {}) {
       const ul = document.getElementById('playlistList');
+      const hasDurationHelper = window.mediaTools && typeof window.mediaTools.getDuration === 'function';
       for (const path of paths) {
         const cleaned = cleanPath(path);
         if (!cleaned) continue;
         const li = document.createElement('li');
-        let duration = durationOverride !== undefined ? durationOverride : await window.mediaTools.getDuration(cleaned);
+        let duration = durationOverride !== undefined ? durationOverride : null;
+        if (duration === null && hasDurationHelper) {
+          try {
+            duration = await window.mediaTools.getDuration(cleaned);
+          } catch (err) {
+            console.warn('getDuration failed', err);
+          }
+        }
         li.textContent = cleaned + " (" + formatTime(duration) + ")";
         li.dataset.path = cleaned;
         li.dataset.duration = duration || 0;
@@ -143,7 +165,9 @@
         ul.appendChild(li);
       }
       updateStartEndTimes();
-      saveSettings();
+      if (!options.skipSave) {
+        saveSettings();
+      }
     }
     function updateStartEndTimes() {
       // Get current time as start
@@ -358,7 +382,14 @@
     };
     // File picker logic
     const fileInput = document.getElementById('fileInput');
-    document.getElementById('addFileBtn').onclick = function() {
+    document.getElementById('addFileBtn').onclick = async function() {
+      if (window.mediaTools && typeof window.mediaTools.selectFiles === 'function') {
+        const selected = await window.mediaTools.selectFiles();
+        if (selected && selected.length) {
+          addToPlaylist(selected);
+        }
+        return;
+      }
       fileInput.value = '';
       fileInput.click();
     };
