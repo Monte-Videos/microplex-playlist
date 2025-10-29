@@ -542,7 +542,12 @@
         };
 
         const files = Array.from(dataTransfer.files || []);
-        addCandidates(files.map(file => file.path || file.name));
+        files.forEach(file => {
+          const candidate = file && typeof file.path === 'string' ? file.path.trim() : '';
+          if (candidate) {
+            rawCandidates.push(candidate);
+          }
+        });
 
         const parsePlainList = input => input.split(/[\r\n]+/)
           .map(line => line.trim())
