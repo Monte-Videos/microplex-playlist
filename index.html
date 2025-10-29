@@ -268,6 +268,13 @@
         return fileUrlToPath(trimmed);
       }
 
+      function isLikelyAbsolute(value) {
+        if (!value) return false;
+        if (value.startsWith('file://')) return true;
+        if (value.startsWith('/') || value.startsWith('\\\\')) return true;
+        return /^[A-Za-z]:[\\/]/.test(value);
+      }
+
       function formatTime(seconds) {
         if (seconds == null || isNaN(seconds)) return '--:--';
         const h = Math.floor(seconds / 3600);
@@ -457,11 +464,11 @@
           types.includes('NSFilenamesPboardType');
       }
 
-      function handleDrop(e) {
+      async function handleDrop(e) {
         e.preventDefault();
         const external = hasExternalPayload(e.dataTransfer);
         if (external) {
-          handleExternalDrop(e);
+          await handleExternalDrop(e);
           return false;
         }
         if (dragSrcEl && dragSrcEl !== this) {
@@ -516,7 +523,7 @@
           .map(line => cleanPath(line));
       }
 
-      function extractDropPaths(dataTransfer) {
+      async function extractDropPaths(dataTransfer) {
         if (!dataTransfer) {
           return [];
         }
@@ -540,13 +547,6 @@
         const parsePlainList = input => input.split(/[\r\n]+/)
           .map(line => line.trim())
           .filter(Boolean);
-
-        const isLikelyAbsolute = value => {
-          if (!value) return false;
-          if (value.startsWith('file://')) return true;
-          if (value.startsWith('/') || value.startsWith('\\\\')) return true;
-          return /^[A-Za-z]:[\\/]/.test(value);
-        };
 
         const dataParsers = [
           { type: 'text/uri-list', parser: parseUriList },
@@ -587,13 +587,33 @@
           }
         }
 
-        const cleaned = Array.from(new Set(rawCandidates
+        let cleaned = Array.from(new Set(rawCandidates
           .map(candidate => cleanPath(candidate))
           .filter(Boolean)));
 
         if (!cleaned.length) {
           return [];
         }
+
+        const originalCleaned = cleaned.slice();
+        if (window.mediaTools && typeof window.mediaTools.normalizePaths === 'function') {
+          try {
+            const resolved = await window.mediaTools.normalizePaths(originalCleaned);
+            if (Array.isArray(resolved) && resolved.length) {
+              cleaned = resolved.map((value, idx) => {
+                const fallback = originalCleaned[idx];
+                if (typeof value === 'string' && value.trim()) {
+                  return cleanPath(value);
+                }
+                return fallback;
+              }).filter(Boolean);
+            }
+          } catch (err) {
+            console.warn('normalizePaths failed', err);
+          }
+        }
+
+        cleaned = Array.from(new Set(cleaned));
 
         const hasAbsolute = cleaned.some(isLikelyAbsolute);
         if (hasAbsolute) {
@@ -603,13 +623,17 @@
         return cleaned;
       }
 
-      function handleExternalDrop(e) {
+      async function handleExternalDrop(e) {
         e.preventDefault();
         e.stopPropagation();
         playlistList.classList.remove('dragover');
-        const paths = extractDropPaths(e.dataTransfer);
-        if (paths.length) {
-          addToPlaylist(paths);
+        try {
+          const paths = await extractDropPaths(e.dataTransfer);
+          if (paths.length) {
+            await addToPlaylist(paths);
+          }
+        } catch (err) {
+          console.warn('Failed to handle external drop', err);
         }
       }
 
