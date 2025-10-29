@@ -404,6 +404,7 @@
       function handleDragEnd() {
         this.classList.remove('dragging');
         playlistList.querySelectorAll('li').forEach(li => li.classList.remove('over'));
+        dragSrcEl = null;
         updateStartEndTimes();
         saveSettings();
       }
@@ -421,10 +422,21 @@
         this.classList.remove('over');
       }
 
+      function hasExternalPayload(dt) {
+        if (!dt) return false;
+        if (dt.files && dt.files.length) return true;
+        const types = Array.from(dt.types || []);
+        return types.includes('Files') || types.includes('public.file-url') || types.includes('text/uri-list') || types.includes('text/plain');
+      }
+
       function handleDrop(e) {
         e.preventDefault();
-        e.stopPropagation();
-        if (dragSrcEl !== this) {
+        const external = hasExternalPayload(e.dataTransfer);
+        if (external) {
+          handleExternalDrop(e);
+          return false;
+        }
+        if (dragSrcEl && dragSrcEl !== this) {
           const nodes = Array.from(playlistList.children);
           const srcIdx = nodes.indexOf(dragSrcEl);
           const tgtIdx = nodes.indexOf(this);
@@ -433,6 +445,7 @@
           } else {
             playlistList.insertBefore(dragSrcEl, this);
           }
+          dragSrcEl = null;
           updateStartEndTimes();
           saveSettings();
         }
@@ -500,6 +513,7 @@
 
       function handleExternalDrop(e) {
         e.preventDefault();
+        e.stopPropagation();
         playlistList.classList.remove('dragover');
         const paths = extractDropPaths(e.dataTransfer);
         if (paths.length) {
