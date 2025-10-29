@@ -422,6 +422,7 @@
       }
 
       function handleDrop(e) {
+        e.preventDefault();
         e.stopPropagation();
         if (dragSrcEl !== this) {
           const nodes = Array.from(playlistList.children);
@@ -467,6 +468,45 @@
       });
       observer.observe(playlistList, { childList: true });
 
+      function extractDropPaths(dataTransfer) {
+        if (!dataTransfer) {
+          return [];
+        }
+
+        const files = Array.from(dataTransfer.files || []);
+        let paths = files.map(file => file.path || file.name).filter(Boolean);
+
+        if (!paths.length) {
+          const uriList = dataTransfer.getData('text/uri-list');
+          if (uriList) {
+            paths = uriList.split('\n')
+              .map(line => line.trim())
+              .filter(line => line && !line.startsWith('#'))
+              .map(line => line.startsWith('file://') ? decodeURI(line.replace('file://', '')) : line);
+          }
+        }
+
+        if (!paths.length) {
+          const plain = dataTransfer.getData('text/plain');
+          if (plain) {
+            paths = plain.split('\n')
+              .map(line => line.trim())
+              .filter(Boolean);
+          }
+        }
+
+        return paths;
+      }
+
+      function handleExternalDrop(e) {
+        e.preventDefault();
+        playlistList.classList.remove('dragover');
+        const paths = extractDropPaths(e.dataTransfer);
+        if (paths.length) {
+          addToPlaylist(paths);
+        }
+      }
+
       playlistList.addEventListener('dragover', e => {
         e.preventDefault();
         playlistList.classList.add('dragover');
@@ -476,33 +516,13 @@
         playlistList.classList.remove('dragover');
       });
 
-      playlistList.addEventListener('drop', e => {
+      playlistList.addEventListener('drop', handleExternalDrop);
+
+      window.addEventListener('dragover', e => {
         e.preventDefault();
-        playlistList.classList.remove('dragover');
-        const files = Array.from(e.dataTransfer?.files || []);
-        let paths = files.map(file => file.path || file.name).filter(Boolean);
-
-        if (!paths.length && e.dataTransfer) {
-          const uriList = e.dataTransfer.getData('text/uri-list');
-          if (uriList) {
-            paths = uriList.split('\n')
-              .map(line => line.trim())
-              .filter(line => line && !line.startsWith('#'))
-              .map(line => line.startsWith('file://') ? decodeURI(line.replace('file://', '')) : line);
-          }
-        }
-
-        if (!paths.length && e.dataTransfer) {
-          const plain = e.dataTransfer.getData('text/plain');
-          if (plain) {
-            paths = plain.split('\n')
-              .map(line => line.trim())
-              .filter(Boolean);
-          }
-        }
-
-        addToPlaylist(paths);
       });
+
+      window.addEventListener('drop', handleExternalDrop);
 
       function connect() {
         if (ws && ws.readyState === 1) {
