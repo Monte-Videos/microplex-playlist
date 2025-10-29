@@ -240,8 +240,32 @@
       let poller = null;
       let scheduleTimeout = null;
 
+      function fileUrlToPath(value) {
+        if (!value || typeof value !== 'string') return value;
+        if (!value.startsWith('file://')) return value;
+        try {
+          const url = new URL(value);
+          if (url.protocol !== 'file:') {
+            return value;
+          }
+          let filePath = decodeURIComponent(url.pathname || '');
+          if (url.host) {
+            filePath = `//${url.host}${filePath}`;
+          }
+          if (/^\/[A-Za-z]:\//.test(filePath)) {
+            filePath = filePath.slice(1);
+          }
+          return filePath || value;
+        } catch (err) {
+          console.warn('Failed to convert file url to path', value, err);
+          return value.replace(/^file:\/\//, '');
+        }
+      }
+
       function cleanPath(path) {
-        return path.replace(/^[\\"']+|[\\"']+$/g, '').trim();
+        if (!path) return '';
+        const trimmed = path.replace(/^[\\"']+|[\\"']+$/g, '').trim();
+        return fileUrlToPath(trimmed);
       }
 
       function formatTime(seconds) {
@@ -426,7 +450,11 @@
         if (!dt) return false;
         if (dt.files && dt.files.length) return true;
         const types = Array.from(dt.types || []);
-        return types.includes('Files') || types.includes('public.file-url') || types.includes('text/uri-list') || types.includes('text/plain');
+        return types.includes('Files') ||
+          types.includes('public.file-url') ||
+          types.includes('text/uri-list') ||
+          types.includes('text/plain') ||
+          types.includes('NSFilenamesPboardType');
       }
 
       function handleDrop(e) {
@@ -481,34 +509,98 @@
       });
       observer.observe(playlistList, { childList: true });
 
+      function parseUriList(list) {
+        return list.split('\n')
+          .map(line => line.trim())
+          .filter(line => line && !line.startsWith('#'))
+          .map(line => cleanPath(line));
+      }
+
       function extractDropPaths(dataTransfer) {
         if (!dataTransfer) {
           return [];
         }
 
+        const rawCandidates = [];
+        const addCandidates = values => {
+          if (!values) return;
+          if (!Array.isArray(values)) {
+            values = [values];
+          }
+          values.forEach(value => {
+            if (typeof value === 'string' && value.trim().length) {
+              rawCandidates.push(value);
+            }
+          });
+        };
+
         const files = Array.from(dataTransfer.files || []);
-        let paths = files.map(file => file.path || file.name).filter(Boolean);
+        addCandidates(files.map(file => file.path || file.name));
 
-        if (!paths.length) {
-          const uriList = dataTransfer.getData('text/uri-list');
-          if (uriList) {
-            paths = uriList.split('\n')
-              .map(line => line.trim())
-              .filter(line => line && !line.startsWith('#'))
-              .map(line => line.startsWith('file://') ? decodeURI(line.replace('file://', '')) : line);
+        const parsePlainList = input => input.split(/[\r\n]+/)
+          .map(line => line.trim())
+          .filter(Boolean);
+
+        const isLikelyAbsolute = value => {
+          if (!value) return false;
+          if (value.startsWith('file://')) return true;
+          if (value.startsWith('/') || value.startsWith('\\\\')) return true;
+          return /^[A-Za-z]:[\\/]/.test(value);
+        };
+
+        const dataParsers = [
+          { type: 'text/uri-list', parser: parseUriList },
+          { type: 'public.file-url', parser: parseUriList },
+          { type: 'Files', parser: parseUriList },
+          {
+            type: 'NSFilenamesPboardType',
+            parser: value => {
+              try {
+                const parsed = JSON.parse(value);
+                if (Array.isArray(parsed)) {
+                  return parsed.map(item => cleanPath(item)).filter(Boolean);
+                }
+              } catch (err) {
+                // Finder sometimes provides a property list style string.
+              }
+              const matches = [];
+              value.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, (_m, match) => {
+                matches.push(cleanPath(match));
+              });
+              if (matches.length) {
+                return matches.filter(Boolean);
+              }
+              return parsePlainList(value).map(item => cleanPath(item));
+            }
+          },
+          { type: 'text/plain', parser: value => parsePlainList(value).map(item => cleanPath(item)) }
+        ];
+
+        for (const { type, parser } of dataParsers) {
+          try {
+            const payload = dataTransfer.getData(type);
+            if (payload) {
+              addCandidates(parser(payload));
+            }
+          } catch (err) {
+            console.warn('Failed to read drop payload type', type, err);
           }
         }
 
-        if (!paths.length) {
-          const plain = dataTransfer.getData('text/plain');
-          if (plain) {
-            paths = plain.split('\n')
-              .map(line => line.trim())
-              .filter(Boolean);
-          }
+        const cleaned = Array.from(new Set(rawCandidates
+          .map(candidate => cleanPath(candidate))
+          .filter(Boolean)));
+
+        if (!cleaned.length) {
+          return [];
         }
 
-        return paths;
+        const hasAbsolute = cleaned.some(isLikelyAbsolute);
+        if (hasAbsolute) {
+          return cleaned.filter(isLikelyAbsolute);
+        }
+
+        return cleaned;
       }
 
       function handleExternalDrop(e) {
