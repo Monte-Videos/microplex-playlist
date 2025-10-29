@@ -4,6 +4,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const ffprobeStatic = require('ffprobe-static');
 const fs = require('fs/promises');
 const path = require('path');
+const os = require('os');
 const { fileURLToPath } = require('url');
 
 const settingsStore = new Store({ name: 'playlist-settings' });
@@ -71,6 +72,28 @@ ipcMain.handle('mediaTools:load-data', (_event, key) => {
   return settingsStore.get(key, null);
 });
 
+function fromFinderColonPath(value) {
+  if (!value || typeof value !== 'string') {
+    return value;
+  }
+  const trimmed = value.trim();
+  const colonPattern = /^[^/\\]+:(?:[^/\\]+:)*[^/\\]+$/;
+  if (!colonPattern.test(trimmed)) {
+    return value;
+  }
+  const pieces = trimmed.split(':').filter(Boolean);
+  if (!pieces.length) {
+    return value;
+  }
+  if (pieces[0] === 'Volumes') {
+    return path.posix.join('/', ...pieces);
+  }
+  if (pieces.length === 1) {
+    return '/' + pieces[0];
+  }
+  return path.posix.join('/', ...pieces.slice(1));
+}
+
 ipcMain.handle('mediaTools:normalize-paths', async (_event, rawValues) => {
   if (!Array.isArray(rawValues)) {
     return [];
@@ -94,6 +117,13 @@ ipcMain.handle('mediaTools:normalize-paths', async (_event, rawValues) => {
       }
     }
 
+    candidate = fromFinderColonPath(candidate) || candidate;
+
+    if (candidate.startsWith('~')) {
+      const remainder = candidate.slice(1).replace(/^\/+/, '');
+      candidate = path.join(os.homedir(), remainder);
+    }
+
     if (!path.isAbsolute(candidate)) {
       return null;
     }
@@ -104,7 +134,7 @@ ipcMain.handle('mediaTools:normalize-paths', async (_event, rawValues) => {
       if (!err || err.code !== 'ENOENT') {
         console.warn('Failed to resolve real path', candidate, err);
       }
-      return candidate;
+      return path.normalize(candidate);
     }
   }));
 

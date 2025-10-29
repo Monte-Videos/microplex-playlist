@@ -262,10 +262,43 @@
         }
       }
 
+      function convertFinderColonPath(value) {
+        if (!value || typeof value !== 'string') {
+          return value;
+        }
+        const colonPattern = /^[^/\\]+:(?:[^/\\]+:)*[^/\\]+$/;
+        if (!colonPattern.test(value.trim())) {
+          return value;
+        }
+        const pieces = value.split(':').filter(Boolean);
+        if (!pieces.length) {
+          return value;
+        }
+        if (pieces[0] === 'Volumes') {
+          return '/' + pieces.join('/');
+        }
+        if (pieces.length === 1) {
+          return '/' + pieces[0];
+        }
+        return '/' + pieces.slice(1).join('/');
+      }
+
       function cleanPath(path) {
         if (!path) return '';
         const trimmed = path.replace(/^[\\"']+|[\\"']+$/g, '').trim();
-        return fileUrlToPath(trimmed);
+        return convertFinderColonPath(fileUrlToPath(trimmed));
+      }
+
+      function isLikelyAbsolute(value) {
+        if (!value) return false;
+        if (value.startsWith('file://')) return true;
+        if (value.startsWith('/') || value.startsWith('\\\\')) return true;
+        return /^[A-Za-z]:[\\/]/.test(value);
+      }
+
+      function isBareFilename(value) {
+        if (!value) return false;
+        return !/[/\\]/.test(value);
       }
 
       function isLikelyAbsolute(value) {
@@ -461,6 +494,10 @@
           types.includes('public.file-url') ||
           types.includes('text/uri-list') ||
           types.includes('text/plain') ||
+          types.includes('public.url') ||
+          types.includes('public.utf8-plain-text') ||
+          types.includes('com.apple.pasteboard.promised-file-url') ||
+          types.includes('CorePasteboardFlavorType 0x75726C20') ||
           types.includes('NSFilenamesPboardType');
       }
 
@@ -556,6 +593,11 @@
         const dataParsers = [
           { type: 'text/uri-list', parser: parseUriList },
           { type: 'public.file-url', parser: parseUriList },
+          { type: 'public.url', parser: parseUriList },
+          { type: 'text/x-moz-url', parser: value => parsePlainList(value).map(item => item.split(/\s+/)[0]).map(item => cleanPath(item)) },
+          { type: 'public.utf8-plain-text', parser: value => parsePlainList(value).map(item => cleanPath(item)) },
+          { type: 'CorePasteboardFlavorType 0x75726C20', parser: parseUriList },
+          { type: 'com.apple.pasteboard.promised-file-url', parser: parseUriList },
           { type: 'Files', parser: parseUriList },
           {
             type: 'NSFilenamesPboardType',
@@ -592,11 +634,16 @@
           }
         }
 
+        const availableTypes = Array.from(dataTransfer.types || []);
+
         let cleaned = Array.from(new Set(rawCandidates
           .map(candidate => cleanPath(candidate))
           .filter(Boolean)));
 
         if (!cleaned.length) {
+          if (availableTypes.length) {
+            console.warn('Drop contained no usable paths', availableTypes);
+          }
           return [];
         }
 
@@ -625,7 +672,13 @@
           return cleaned.filter(isLikelyAbsolute);
         }
 
-        return cleaned;
+        const nonBare = cleaned.filter(value => !isBareFilename(value));
+        if (nonBare.length) {
+          return nonBare;
+        }
+
+        console.warn('Ignoring bare filename drop entries', cleaned, availableTypes);
+        return [];
       }
 
       async function handleExternalDrop(e) {
@@ -636,6 +689,8 @@
           const paths = await extractDropPaths(e.dataTransfer);
           if (paths.length) {
             await addToPlaylist(paths);
+          } else {
+            setStatus('Dropped files could not be read. Please try again or use Add Files…');
           }
         } catch (err) {
           console.warn('Failed to handle external drop', err);
