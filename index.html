@@ -240,8 +240,32 @@
       let poller = null;
       let scheduleTimeout = null;
 
+      function fileUrlToPath(value) {
+        if (!value || typeof value !== 'string') return value;
+        if (!value.startsWith('file://')) return value;
+        try {
+          const url = new URL(value);
+          if (url.protocol !== 'file:') {
+            return value;
+          }
+          let filePath = decodeURIComponent(url.pathname || '');
+          if (url.host) {
+            filePath = `//${url.host}${filePath}`;
+          }
+          if (/^\/[A-Za-z]:\//.test(filePath)) {
+            filePath = filePath.slice(1);
+          }
+          return filePath || value;
+        } catch (err) {
+          console.warn('Failed to convert file url to path', value, err);
+          return value.replace(/^file:\/\//, '');
+        }
+      }
+
       function cleanPath(path) {
-        return path.replace(/^[\\"']+|[\\"']+$/g, '').trim();
+        if (!path) return '';
+        const trimmed = path.replace(/^[\\"']+|[\\"']+$/g, '').trim();
+        return fileUrlToPath(trimmed);
       }
 
       function formatTime(seconds) {
@@ -481,6 +505,17 @@
       });
       observer.observe(playlistList, { childList: true });
 
+      function parseUriList(list) {
+        return list.split('\n')
+          .map(line => line.trim())
+          .filter(line => line && !line.startsWith('#'))
+          .map(line => cleanPath(line));
+      }
+
+      function looksLikeFilenameOnly(value) {
+        return typeof value === 'string' && value.length > 0 && !/[\\/]/.test(value) && !value.startsWith('file://');
+      }
+
       function extractDropPaths(dataTransfer) {
         if (!dataTransfer) {
           return [];
@@ -489,22 +524,35 @@
         const files = Array.from(dataTransfer.files || []);
         let paths = files.map(file => file.path || file.name).filter(Boolean);
 
-        if (!paths.length) {
+        if (!paths.length || paths.every(looksLikeFilenameOnly)) {
           const uriList = dataTransfer.getData('text/uri-list');
           if (uriList) {
-            paths = uriList.split('\n')
-              .map(line => line.trim())
-              .filter(line => line && !line.startsWith('#'))
-              .map(line => line.startsWith('file://') ? decodeURI(line.replace('file://', '')) : line);
+            const uriPaths = parseUriList(uriList);
+            if (uriPaths.length) {
+              paths = uriPaths;
+            }
           }
         }
 
-        if (!paths.length) {
+        if (!paths.length || paths.every(looksLikeFilenameOnly)) {
+          const publicUrl = dataTransfer.getData('public.file-url');
+          if (publicUrl) {
+            const fileUrlPaths = parseUriList(publicUrl);
+            if (fileUrlPaths.length) {
+              paths = fileUrlPaths;
+            }
+          }
+        }
+
+        if (!paths.length || paths.every(looksLikeFilenameOnly)) {
           const plain = dataTransfer.getData('text/plain');
           if (plain) {
-            paths = plain.split('\n')
-              .map(line => line.trim())
+            const plainPaths = plain.split('\n')
+              .map(line => cleanPath(line))
               .filter(Boolean);
+            if (plainPaths.length) {
+              paths = plainPaths;
+            }
           }
         }
 
