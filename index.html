@@ -1275,6 +1275,10 @@
 
       function hasExternalPayload(dt) {
         if (!dt) return false;
+        const items = Array.from(dt.items || []);
+        if (items.some(item => item.kind === 'file')) {
+          return true;
+        }
         if (dt.files && dt.files.length) return true;
         const types = Array.from(dt.types || []);
         return types.includes('Files') ||
