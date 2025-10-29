@@ -516,7 +516,10 @@
         playlistList.classList.remove('dragover');
       });
 
-      playlistList.addEventListener('drop', handleExternalDrop);
+      playlistList.addEventListener('drop', e => {
+        e.stopPropagation();
+        handleExternalDrop(e);
+      });
 
       window.addEventListener('dragover', e => {
         e.preventDefault();
