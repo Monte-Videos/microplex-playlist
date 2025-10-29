@@ -150,7 +150,8 @@
       flex-wrap: wrap;
       gap: 8px;
     }
-    .playlist-toolbar .left {
+    .playlist-toolbar .left,
+    .playlist-toolbar .right {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -254,6 +255,9 @@
             <input type="file" id="fileInput" style="display:none;" multiple>
             <span class="remove-tip">Drag files in, multi-select with Shift/Cmd to reorder together, double-click or press Delete to remove.</span>
           </div>
+          <div class="right">
+            <button id="recalcTimesBtn" class="secondary">Recalculate Times</button>
+          </div>
         </div>
         <div class="playlist-table">
           <div class="playlist-header">
@@ -291,6 +295,7 @@
     let playingItemId = null;
     let isRestoring = false;
     let timelineAnchor = null;
+    let timelineComputed = false;
     const selectedItemIds = new Set();
     let lastSelectedIndex = null;
     let dragSelectionIds = null;
@@ -347,6 +352,15 @@
           if (!cleaned.startsWith('/') && !/^[A-Za-z]:/.test(cleaned)) {
             cleaned = '/' + cleaned;
           }
+        }
+      }
+      if (!cleaned.startsWith('/') && /:/.test(cleaned) && !/^[A-Za-z]:[\\/]/.test(cleaned) && !/^[a-z]+:\/\//i.test(cleaned)) {
+        const parts = cleaned.split(':').filter(Boolean);
+        if (parts.length > 1) {
+          parts.shift();
+        }
+        if (parts.length) {
+          cleaned = '/' + parts.join('/');
         }
       }
       return cleaned;
@@ -471,7 +485,7 @@
       pruneSelection();
       updateSelectionStyles();
       recomputeCurrentIndex();
-      updateStartEndTimes();
+      invalidateTimeline();
       updatePlayingIndicator();
       saveSettings();
     }
@@ -522,11 +536,7 @@
     }
 
     function getTimelineStartDate() {
-      if (isValidDate(timelineAnchor)) {
-        return timelineAnchor;
-      }
-      const scheduleDate = getScheduleStartDate();
-      return isValidDate(scheduleDate) ? scheduleDate : null;
+      return isValidDate(timelineAnchor) ? timelineAnchor : null;
     }
 
     function formatClock(date) {
@@ -535,6 +545,21 @@
       const minutes = String(date.getMinutes()).padStart(2, '0');
       const seconds = String(date.getSeconds()).padStart(2, '0');
       return `${hours}:${minutes}:${seconds}`;
+    }
+
+    function collectFileListPaths(dt) {
+      if (!dt || !dt.files) return [];
+      const results = new Set();
+      Array.from(dt.files).forEach(file => {
+        if (!file) return;
+        const raw = file.path || file.pathName || file.name;
+        if (!raw) return;
+        const normalized = normalizePath(raw);
+        if (isLikelyFilePath(normalized)) {
+          results.add(normalized);
+        }
+      });
+      return Array.from(results);
     }
 
     async function extractPathsFromDataTransfer(dt) {
@@ -624,7 +649,7 @@
       }
 
       if (dt && typeof dt.getData === 'function') {
-        ['text/uri-list', 'public.file-url', 'com.apple.pasteboard.promised-file-url'].forEach(type => {
+        ['text/uri-list', 'public.file-url', 'com.apple.pasteboard.promised-file-url', 'Files'].forEach(type => {
           try {
             addFromUriList(dt.getData(type));
           } catch (err) {
@@ -704,6 +729,7 @@
       clearSelection();
       renderSidebar();
       timelineAnchor = getScheduleStartDate();
+      timelineComputed = false;
       renderActivePlaylist();
       const active = getActivePlaylist();
       mediaSourceInput.value = (active && active.mediaSource) ? active.mediaSource : (active ? active.name : '');
@@ -781,7 +807,9 @@
         getPlaylistNodes().forEach(node => node.classList.remove('over'));
         playlistList.classList.remove('dragover');
         dragSelectionIds = null;
-        updateStartEndTimes();
+        if (timelineComputed) {
+          updateStartEndTimes();
+        }
       });
       li.addEventListener('dragover', function(e) {
         if (!dragSelectionIds || !dragSelectionIds.length) return;
@@ -827,15 +855,16 @@
     }
 
     function updateStartEndTimes() {
-      const scheduleStart = getTimelineStartDate();
+      const showTimeline = timelineComputed && isValidDate(getTimelineStartDate());
+      const scheduleStart = showTimeline ? getTimelineStartDate() : null;
       let acc = 0;
       Array.from(playlistList.children).forEach(node => {
         const duration = Number(node.dataset.duration);
         const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : 0;
         const startSeconds = acc;
         const endSeconds = acc + safeDuration;
-        let startText = formatTime(startSeconds);
-        let endText = formatTime(endSeconds);
+        let startText = '--:--';
+        let endText = '--:--';
         if (scheduleStart) {
           const startDate = new Date(scheduleStart.getTime() + startSeconds * 1000);
           const endDate = new Date(scheduleStart.getTime() + endSeconds * 1000);
@@ -856,6 +885,66 @@
       Array.from(playlistList.children).forEach(node => {
         node.classList.toggle('playing', playing && node.dataset.itemId === playingItemId);
       });
+    }
+
+    function invalidateTimeline() {
+      timelineComputed = false;
+      updateStartEndTimes();
+    }
+
+    async function recalculateTimeline() {
+      const active = getActivePlaylist();
+      if (!active || !active.items.length) {
+        const scheduleStart = getScheduleStartDate();
+        timelineAnchor = isValidDate(scheduleStart) ? scheduleStart : null;
+        timelineComputed = false;
+        updateStartEndTimes();
+        return;
+      }
+
+      let anchor = null;
+      const scheduleStart = getScheduleStartDate();
+      if (isValidDate(scheduleStart)) {
+        anchor = new Date(scheduleStart.getTime());
+      }
+
+      let playingIndex = -1;
+      if (playingItemId) {
+        playingIndex = active.items.findIndex(item => item.id === playingItemId);
+      }
+      if (playingIndex === -1 && playing && Number.isInteger(currentIndex) && currentIndex >= 0 && currentIndex < active.items.length) {
+        playingIndex = currentIndex;
+      }
+
+      let elapsedBefore = 0;
+      let cursorSeconds = 0;
+      if (playingIndex !== -1) {
+        elapsedBefore = getElapsedDurationBeforeIndex(playingIndex);
+        const status = await sendRequestAsync('GetMediaInputStatus', { inputName: getMediaSource() });
+        const response = status && status.responseData ? status.responseData : null;
+        if (response) {
+          if (typeof response.mediaCursor === 'number') {
+            cursorSeconds = Math.max(0, response.mediaCursor / 1000);
+          }
+          if (typeof response.mediaDuration === 'number' && response.mediaDuration > 0) {
+            const durationSeconds = response.mediaDuration / 1000;
+            if (cursorSeconds > durationSeconds) {
+              cursorSeconds = durationSeconds;
+            }
+          }
+        }
+        const actualStart = Date.now() - cursorSeconds * 1000;
+        const playlistStartMs = actualStart - elapsedBefore * 1000;
+        anchor = new Date(playlistStartMs);
+      }
+
+      if (!anchor) {
+        anchor = new Date();
+      }
+
+      timelineAnchor = anchor;
+      timelineComputed = true;
+      updateStartEndTimes();
     }
 
     function getElapsedDurationBeforeIndex(idx) {
@@ -882,7 +971,9 @@
       currentIndex = idx;
       const elapsedBefore = getElapsedDurationBeforeIndex(idx);
       timelineAnchor = new Date(Date.now() - elapsedBefore * 1000);
-      updateStartEndTimes();
+      if (timelineComputed) {
+        updateStartEndTimes();
+      }
       updatePlayingIndicator();
       setStatus(`Playing: ${item.path}`);
       return true;
@@ -914,7 +1005,9 @@
           }
         }
         timelineAnchor = new Date();
-        updateStartEndTimes();
+        if (timelineComputed) {
+          updateStartEndTimes();
+        }
         updatePlayingIndicator();
         startPolling();
       });
@@ -979,6 +1072,7 @@
           currentIndex = Math.max(0, currentIndex - removedBeforeCurrent);
         }
       }
+      timelineComputed = false;
       renderActivePlaylist();
       saveSettings();
     }
@@ -1023,6 +1117,7 @@
       if (!addedIds.size) return;
       selectedItemIds.clear();
       addedIds.forEach(id => selectedItemIds.add(id));
+      timelineComputed = false;
       renderActivePlaylist();
       await saveSettings();
       const refreshed = getActivePlaylist();
@@ -1056,7 +1151,7 @@
           updatedDom = true;
         }
       }
-      if (updatedDom) {
+      if (updatedDom && timelineComputed) {
         updateStartEndTimes();
       }
       if (updatedData) {
@@ -1100,6 +1195,7 @@
         ensureDefaultPlaylist();
         activatePlaylist(activePlaylistId);
         timelineAnchor = getScheduleStartDate();
+        timelineComputed = false;
         updateStartEndTimes();
         return;
       }
@@ -1115,6 +1211,7 @@
       if (wsUrl) wsUrlInput.value = wsUrl;
       if (scheduleTime) scheduleInput.value = scheduleTime;
       timelineAnchor = getScheduleStartDate();
+      timelineComputed = false;
       playlists.length = 0;
       let convertedLegacy = false;
       if (Array.isArray(storedPlaylists) && storedPlaylists.length) {
@@ -1236,6 +1333,30 @@
       }
     }
 
+    function sendRequestAsync(requestType, requestData, timeoutMs = 2000) {
+      if (!ws || ws.readyState !== 1) {
+        return Promise.resolve(null);
+      }
+      return new Promise(resolve => {
+        const requestId = `req-${requestCounter++}`;
+        const msg = { op: 6, d: { requestType, requestId, requestData } };
+        const handler = event => {
+          const resp = JSON.parse(event.data);
+          if (resp.op === 7 && resp.d.requestId === requestId) {
+            clearTimeout(timer);
+            ws.removeEventListener('message', handler);
+            resolve(resp.d);
+          }
+        };
+        const timer = setTimeout(() => {
+          ws.removeEventListener('message', handler);
+          resolve(null);
+        }, Math.max(500, timeoutMs));
+        ws.addEventListener('message', handler);
+        ws.send(JSON.stringify(msg));
+      });
+    }
+
     function startPolling() {
       if (poller) clearInterval(poller);
       poller = setInterval(() => {
@@ -1265,7 +1386,7 @@
         updatePlayingIndicator();
         const scheduleDate = getScheduleStartDate();
         timelineAnchor = isValidDate(scheduleDate) ? scheduleDate : null;
-        updateStartEndTimes();
+        invalidateTimeline();
         return;
       }
       const item = active.items[idx];
@@ -1341,6 +1462,15 @@
         return;
       }
       playNext();
+    };
+
+    document.getElementById('recalcTimesBtn').onclick = () => {
+      recalculateTimeline().then(() => {
+        setStatus('Timeline recalculated.');
+      }).catch(err => {
+        console.warn('Failed to recalculate timeline', err);
+        setStatus('Timeline recalculation failed.');
+      });
     };
 
     updateStreamButton();
@@ -1420,7 +1550,8 @@
       e.stopPropagation();
       playlistList.classList.remove('dragover');
       try {
-        const paths = await extractPathsFromDataTransfer(e.dataTransfer);
+        const immediate = collectFileListPaths(e.dataTransfer);
+        const paths = immediate.length ? immediate : await extractPathsFromDataTransfer(e.dataTransfer);
         if (paths.length) {
           await appendPathsToActivePlaylist(paths);
         }
@@ -1462,7 +1593,8 @@
         moveSelectionToTargetNode(null);
         return;
       }
-      const paths = await extractPathsFromDataTransfer(e.dataTransfer);
+      const immediate = collectFileListPaths(e.dataTransfer);
+      const paths = immediate.length ? immediate : await extractPathsFromDataTransfer(e.dataTransfer);
       if (paths.length) {
         await appendPathsToActivePlaylist(paths);
       }
@@ -1524,7 +1656,7 @@
     scheduleInput.addEventListener('input', () => {
       const scheduleDate = getScheduleStartDate();
       timelineAnchor = isValidDate(scheduleDate) ? scheduleDate : null;
-      updateStartEndTimes();
+      invalidateTimeline();
       saveSettings();
     });
 
