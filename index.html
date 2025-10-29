@@ -158,6 +158,31 @@
       font-size: 0.85em;
       color: #455a64;
     }
+    .playlist li:last-child {
+      border-bottom: none;
+    }
+    .playlist li.dragging {
+      opacity: 0.6;
+      background: #eceff1;
+    }
+    .playlist li.over {
+      border-top: 2px solid #1e88e5;
+    }
+    .entry-label {
+      font-weight: 600;
+      color: #263238;
+      word-break: break-word;
+      flex: 1;
+    }
+    .entry-meta {
+      min-width: 200px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.25em;
+      font-size: 0.85em;
+      color: #455a64;
+    }
     .entry-length {
       font-weight: 600;
     }
@@ -333,7 +358,16 @@
       const numeric = typeof value === 'number' ? value : Number(value);
       return Number.isFinite(numeric) ? numeric : null;
     }
+    function normalizeDuration(value) {
+      if (value === undefined || value === null) return null;
+      const numeric = typeof value === 'number' ? value : Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    }
     async function addToPlaylist(paths, durationOverride, options = {}) {
+      if (!Array.isArray(paths) || !paths.length) {
+        return;
+      }
+
       const ul = document.getElementById('playlistList');
       const hasDurationHelper = window.mediaTools && typeof window.mediaTools.getDuration === 'function';
       const pendingUpdates = [];
@@ -345,6 +379,8 @@
         const li = document.createElement('li');
         li.dataset.path = cleaned;
         li.draggable = true;
+
+        attachDragHandlers(li);
 
         const label = document.createElement('span');
         label.className = 'entry-label';
@@ -504,16 +540,18 @@
       updateSelectionStyles();
       lastSelectedIndex = index;
     }
-
-    function finalizeReorder() {
-      dragSelectionIds = null;
-      syncActivePlaylistFromDom();
-      pruneSelection();
-      updateSelectionStyles();
-      recomputeCurrentIndex();
-      invalidateTimeline();
-      updatePlayingIndicator();
-      saveSettings();
+    function attachDragHandlers(li) {
+      if (!li || li.__dragHandlersAttached) {
+        return;
+      }
+      li.addEventListener('dragstart', handleDragStart);
+      li.addEventListener('dragend', handleDragEnd);
+      li.addEventListener('dragover', handleDragOver);
+      li.addEventListener('dragenter', handleDragEnter);
+      li.addEventListener('dragleave', handleDragLeave);
+      li.addEventListener('drop', handleDrop);
+      li.addEventListener('dblclick', function() { li.remove(); updateStartEndTimes(); saveSettings(); });
+      li.__dragHandlersAttached = true;
     }
 
     function moveSelectionToIndex(targetIndex) {
@@ -585,135 +623,43 @@
           results.add(normalized);
         }
       });
-      return Array.from(results);
-    }
+    });
+    observer.observe(playlistList, { childList: true });
+    // Drag-and-drop files from desktop
+    playlistList.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      playlistList.classList.add('dragover');
+    });
+    playlistList.addEventListener('dragleave', function(e) {
+      playlistList.classList.remove('dragover');
+    });
+    playlistList.addEventListener('drop', function(e) {
+      e.preventDefault();
+      playlistList.classList.remove('dragover');
+      const files = Array.from(e.dataTransfer.files || []);
+      let paths = files.map(file => file.path || file.name).filter(Boolean);
 
-    async function extractPathsFromDataTransfer(dt) {
-      if (!dt) return [];
-      const results = new Set();
-      const addPath = raw => {
-        const normalized = normalizePath(raw);
-        if (isLikelyFilePath(normalized)) {
-          results.add(normalized);
+      if (!paths.length && e.dataTransfer) {
+        const uriList = e.dataTransfer.getData('text/uri-list');
+        if (uriList) {
+          paths = uriList.split('\n')
+            .map(line => line.trim())
+            .filter(line => line && !line.startsWith('#'))
+            .map(line => line.startsWith('file://') ? decodeURI(line.replace('file://', '')) : line);
         }
-      };
+      }
 
-      const fileList = dt.files ? Array.from(dt.files) : [];
-      fileList.forEach(file => {
-        if (!file) return;
-        if (file.path) {
-          addPath(file.path);
-        } else if (file.name) {
-          addPath(file.name);
+      if (!paths.length && e.dataTransfer) {
+        const plain = e.dataTransfer.getData('text/plain');
+        if (plain) {
+          paths = plain.split('\n')
+            .map(line => line.trim())
+            .filter(Boolean);
         }
-      });
-      if (results.size) {
-        return Array.from(results);
       }
 
-      const addFromUriList = text => {
-        if (!text) return;
-        text.split(/\r?\n/).forEach(line => {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith('#')) return;
-          addPath(trimmed);
-        });
-      };
-      const addFromPlainText = text => {
-        if (!text) return;
-        text.split(/\r?\n/).forEach(line => {
-          const trimmed = line.trim();
-          if (!trimmed) return;
-          if (/^file:\/\//i.test(trimmed) || isLikelyFilePath(trimmed)) {
-            addPath(trimmed);
-          }
-        });
-      };
-      const addFromNsFilenames = text => {
-        if (!text) return;
-        try {
-          const parsed = JSON.parse(text);
-          if (Array.isArray(parsed)) {
-            parsed.forEach(addPath);
-            return;
-          }
-        } catch (err) {
-          // fall through to line-based parsing
-        }
-        text.split(/\r?\n/).forEach(line => {
-          const trimmed = line.trim().replace(/^\(|\)|,$/g, '');
-          if (!trimmed) return;
-          const unquoted = trimmed.replace(/^['\"]+|['\"]+$/g, '');
-          addPath(unquoted);
-        });
-      };
-
-      const stringItemPromises = [];
-      if (dt.items) {
-        Array.from(dt.items).forEach(item => {
-          if (!item) return;
-          if (item.kind === 'file') {
-            const file = typeof item.getAsFile === 'function' ? item.getAsFile() : null;
-            if (file) {
-              if (file.path) {
-                addPath(file.path);
-              } else if (file.name) {
-                addPath(file.name);
-              }
-            }
-          } else if (item.kind === 'string' && typeof item.getAsString === 'function') {
-            stringItemPromises.push(new Promise(resolve => {
-              item.getAsString(text => {
-                addFromUriList(text);
-                addFromPlainText(text);
-                addFromNsFilenames(text);
-                resolve();
-              });
-            }));
-          }
-        });
-      }
-
-      if (dt && typeof dt.getData === 'function') {
-        ['text/uri-list', 'public.file-url', 'com.apple.pasteboard.promised-file-url', 'Files'].forEach(type => {
-          try {
-            addFromUriList(dt.getData(type));
-          } catch (err) {
-            // ignore unsupported type
-          }
-        });
-        ['text/plain', 'public.utf8-plain-text'].forEach(type => {
-          try {
-            addFromPlainText(dt.getData(type));
-          } catch (err) {
-            // ignore unsupported type
-          }
-        });
-        ['NSFilenamesPboardType'].forEach(type => {
-          try {
-            addFromNsFilenames(dt.getData(type));
-          } catch (err) {
-            // ignore unsupported type
-          }
-        });
-      }
-
-      if (stringItemPromises.length) {
-        await Promise.allSettled(stringItemPromises);
-      }
-
-      return Array.from(results);
-    }
-
-    function getMediaSource() {
-      const active = getActivePlaylist();
-      const inputValue = mediaSourceInput.value.trim();
-      if (active) {
-        const source = (active.mediaSource || '').trim();
-        return source || inputValue || active.name || 'Media';
-      }
-      return inputValue || 'Media';
-    }
+      addToPlaylist(paths);
+    });
 
     function setStatus(msg) {
       document.getElementById('status').textContent = msg || '';
@@ -1482,24 +1428,29 @@
     // File picker logic
     const fileInput = document.getElementById('fileInput');
     document.getElementById('addFileBtn').onclick = async function() {
+      let selected = [];
+
       if (window.mediaTools && typeof window.mediaTools.selectFiles === 'function') {
-        const selected = await window.mediaTools.selectFiles();
-        if (selected && selected.length) {
-          addToPlaylist(selected);
+        try {
+          selected = await window.mediaTools.selectFiles();
+        } catch (err) {
+          console.warn('selectFiles failed', err);
         }
+      }
+
+      if (selected && selected.length) {
+        addToPlaylist(selected);
         return;
       }
+
       fileInput.value = '';
       fileInput.click();
     };
-
-    document.getElementById('recalcTimesBtn').onclick = () => {
-      recalculateTimeline().then(() => {
-        setStatus('Timeline recalculated.');
-      }).catch(err => {
-        console.warn('Failed to recalculate timeline', err);
-        setStatus('Timeline recalculation failed.');
-      });
+    fileInput.onchange = function() {
+      const files = Array.from(fileInput.files || []);
+      const paths = files.map(file => file.path || file.name).filter(Boolean);
+      addToPlaylist(paths);
+      fileInput.value = '';
     };
 
     updateStreamButton();
