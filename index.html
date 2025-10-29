@@ -225,63 +225,13 @@
   </style>
 </head>
 <body>
-  <div id="app">
-    <aside class="sidebar">
-      <header>
-        <h2>Playlists</h2>
-        <button id="newPlaylistBtn" title="New playlist">+</button>
-      </header>
-      <ul id="playlistSidebar"></ul>
-    </aside>
-    <main class="main">
-      <section class="connection">
-        <label>
-          OBS WebSocket URL
-          <input type="text" id="wsUrl" value="ws://the-microplex:4455">
-        </label>
-        <button id="connectBtn" class="primary">Connect</button>
-        <span id="connStatus">Not connected</span>
-      </section>
-      <section class="media-source">
-        <label>
-          Media Source Name
-          <input type="text" id="mediaSource" placeholder="OBS source name">
-        </label>
-      </section>
-      <section class="playlist-section">
-        <div class="playlist-toolbar">
-          <div class="left">
-            <button id="addFileBtn" class="secondary">Add File</button>
-            <input type="file" id="fileInput" style="display:none;" multiple>
-            <span class="remove-tip">Drag files in, multi-select with Shift/Cmd to reorder together, double-click or press Delete to remove.</span>
-          </div>
-          <div class="right">
-            <button id="recalcTimesBtn" class="secondary">Recalculate Times</button>
-          </div>
-        </div>
-        <div class="playlist-table">
-          <div class="playlist-header">
-            <div>Title</div>
-            <div>Duration</div>
-            <div>Start</div>
-            <div>End</div>
-          </div>
-          <ul id="playlistList"></ul>
-        </div>
-      </section>
-      <section class="controls">
-        <button id="playBtn" class="primary">Play</button>
-        <button id="skipBtn" class="secondary">Skip</button>
-        <button id="streamBtn" class="secondary">Start Streaming</button>
-      </section>
-      <section class="schedule">
-        <label>Schedule Start
-          <input type="datetime-local" id="scheduleTime">
-        </label>
-        <button id="scheduleBtn" class="secondary">Schedule Start</button>
-      </section>
-      <div id="status"></div>
-    </main>
+  <h2>OBS Playlist POC</h2>
+  <div>
+    <label>OBS WebSocket URL:<br>
+      <input type="text" id="wsUrl" value="ws://the-microplex:4455" style="width: 100%;">
+    </label>
+    <button id="connectBtn">Connect</button>
+    <span id="connStatus">Not connected</span>
   </div>
 
   <script>
@@ -309,8 +259,46 @@
     const wsUrlInput = document.getElementById('wsUrl');
     const scheduleInput = document.getElementById('scheduleTime');
 
-    function generateId(prefix) {
-      return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    // --- Persistence ---
+    async function saveSettings() {
+      if (!window.mediaTools) return;
+      try {
+        await Promise.all([
+          window.mediaTools.saveData('wsUrl', document.getElementById('wsUrl').value),
+          window.mediaTools.saveData('mediaSource', document.getElementById('mediaSource').value),
+          window.mediaTools.saveData('playlist', getPlaylistData()),
+          window.mediaTools.saveData('scheduleTime', document.getElementById('scheduleTime').value)
+        ]);
+      } catch (err) {
+        console.warn('saveSettings failed', err);
+      }
+    }
+    async function loadSettings() {
+      if (!window.mediaTools) return;
+      try {
+        const [wsUrl, mediaSource, playlistData, scheduleTime] = await Promise.all([
+          window.mediaTools.loadData('wsUrl'),
+          window.mediaTools.loadData('mediaSource'),
+          window.mediaTools.loadData('playlist'),
+          window.mediaTools.loadData('scheduleTime')
+        ]);
+        if (wsUrl) document.getElementById('wsUrl').value = wsUrl;
+        if (mediaSource) document.getElementById('mediaSource').value = mediaSource;
+        if (Array.isArray(playlistData)) {
+          playlistList.innerHTML = '';
+          for (const item of playlistData) {
+            await addToPlaylist([item.path], item.duration, { skipSave: true });
+          }
+        }
+        if (scheduleTime) document.getElementById('scheduleTime').value = scheduleTime;
+      } catch (err) {
+        console.warn('loadSettings failed', err);
+      }
+    }
+
+    // --- Playlist + Duration + Start/End ---
+    function cleanPath(path) {
+      return path.replace(/^['\"]+|['\"]+$/g, '').trim();
     }
 
     function isValidDate(value) {
@@ -334,36 +322,31 @@
         activePlaylistId = playlists[0].id;
       }
     }
-
-    function normalizePath(rawPath) {
-      if (!rawPath) return '';
-      let cleaned = rawPath.trim().replace(/^['\"]+|['\"]+$/g, '');
-      if (/^file:\/\//i.test(cleaned)) {
-        try {
-          const uri = new URL(cleaned);
-          let pathname = decodeURIComponent(uri.pathname || '');
-          if (/^\/[A-Za-z]:/.test(pathname)) {
-            pathname = pathname.slice(1);
-          }
-          cleaned = pathname || '';
-        } catch (err) {
-          cleaned = cleaned.replace(/^file:\/\//i, '');
-          cleaned = decodeURIComponent(cleaned);
-          if (!cleaned.startsWith('/') && !/^[A-Za-z]:/.test(cleaned)) {
-            cleaned = '/' + cleaned;
+    async function addToPlaylist(paths, durationOverride, options = {}) {
+      const ul = document.getElementById('playlistList');
+      const hasDurationHelper = window.mediaTools && typeof window.mediaTools.getDuration === 'function';
+      for (const path of paths) {
+        const cleaned = cleanPath(path);
+        if (!cleaned) continue;
+        const li = document.createElement('li');
+        let duration = durationOverride !== undefined ? durationOverride : null;
+        if (duration === null && hasDurationHelper) {
+          try {
+            duration = await window.mediaTools.getDuration(cleaned);
+          } catch (err) {
+            console.warn('getDuration failed', err);
           }
         }
+        li.textContent = cleaned + " (" + formatTime(duration) + ")";
+        li.dataset.path = cleaned;
+        li.dataset.duration = duration || 0;
+        li.draggable = true;
+        ul.appendChild(li);
       }
-      if (!cleaned.startsWith('/') && /:/.test(cleaned) && !/^[A-Za-z]:[\\/]/.test(cleaned) && !/^[a-z]+:\/\//i.test(cleaned)) {
-        const parts = cleaned.split(':').filter(Boolean);
-        if (parts.length > 1) {
-          parts.shift();
-        }
-        if (parts.length) {
-          cleaned = '/' + parts.join('/');
-        }
+      updateStartEndTimes();
+      if (!options.skipSave) {
+        saveSettings();
       }
-      return cleaned;
     }
 
     function isLikelyFilePath(path) {
@@ -1449,19 +1432,22 @@
         setStatus('Playlist is empty.');
         return;
       }
-      if (!playing) {
-        const activeIdx = active.items.findIndex(item => item.id === playingItemId);
-        const baseIndex = activeIdx !== -1 ? activeIdx : Math.max(-1, currentIndex - 1);
-        const targetIndex = baseIndex + 1;
-        if (targetIndex >= active.items.length) {
-          setStatus('Reached end of playlist.');
-          return;
+      sendRequest("StartStream", {}, (data) => {
+        setStatus("Streaming started!");
+      });
+    };
+    // File picker logic
+    const fileInput = document.getElementById('fileInput');
+    document.getElementById('addFileBtn').onclick = async function() {
+      if (window.mediaTools && typeof window.mediaTools.selectFiles === 'function') {
+        const selected = await window.mediaTools.selectFiles();
+        if (selected && selected.length) {
+          addToPlaylist(selected);
         }
-        playing = true;
-        playIndex(Math.max(0, targetIndex));
         return;
       }
-      playNext();
+      fileInput.value = '';
+      fileInput.click();
     };
 
     document.getElementById('recalcTimesBtn').onclick = () => {
