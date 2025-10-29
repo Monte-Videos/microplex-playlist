@@ -2,7 +2,10 @@ const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const Store = require('electron-store').default;
 const ffmpeg = require('fluent-ffmpeg');
 const ffprobeStatic = require('ffprobe-static');
+const fs = require('fs/promises');
 const path = require('path');
+const os = require('os');
+const { fileURLToPath } = require('url');
 
 const settingsStore = new Store({ name: 'playlist-settings' });
 ffmpeg.setFfprobePath(ffprobeStatic.path);
@@ -67,4 +70,73 @@ ipcMain.handle('mediaTools:load-data', (_event, key) => {
     return null;
   }
   return settingsStore.get(key, null);
+});
+
+function fromFinderColonPath(value) {
+  if (!value || typeof value !== 'string') {
+    return value;
+  }
+  const trimmed = value.trim();
+  const colonPattern = /^[^/\\]+:(?:[^/\\]+:)*[^/\\]+$/;
+  if (!colonPattern.test(trimmed)) {
+    return value;
+  }
+  const pieces = trimmed.split(':').filter(Boolean);
+  if (!pieces.length) {
+    return value;
+  }
+  if (pieces[0] === 'Volumes') {
+    return path.posix.join('/', ...pieces);
+  }
+  if (pieces.length === 1) {
+    return '/' + pieces[0];
+  }
+  return path.posix.join('/', ...pieces.slice(1));
+}
+
+ipcMain.handle('mediaTools:normalize-paths', async (_event, rawValues) => {
+  if (!Array.isArray(rawValues)) {
+    return [];
+  }
+
+  const results = await Promise.all(rawValues.map(async (raw) => {
+    if (typeof raw !== 'string') {
+      return null;
+    }
+
+    let candidate = raw.trim();
+    if (!candidate) {
+      return null;
+    }
+
+    if (candidate.startsWith('file://')) {
+      try {
+        candidate = fileURLToPath(candidate);
+      } catch (err) {
+        console.warn('Failed to convert file url to path', candidate, err);
+      }
+    }
+
+    candidate = fromFinderColonPath(candidate) || candidate;
+
+    if (candidate.startsWith('~')) {
+      const remainder = candidate.slice(1).replace(/^\/+/, '');
+      candidate = path.join(os.homedir(), remainder);
+    }
+
+    if (!path.isAbsolute(candidate)) {
+      return null;
+    }
+
+    try {
+      return await fs.realpath(candidate);
+    } catch (err) {
+      if (!err || err.code !== 'ENOENT') {
+        console.warn('Failed to resolve real path', candidate, err);
+      }
+      return path.normalize(candidate);
+    }
+  }));
+
+  return results;
 });

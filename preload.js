@@ -18,5 +18,8 @@ contextBridge.exposeInMainWorld('mediaTools', {
   },
   loadData(key) {
     return ipcRenderer.invoke('mediaTools:load-data', key);
+  },
+  normalizePaths(values) {
+    return ipcRenderer.invoke('mediaTools:normalize-paths', values);
   }
 });
