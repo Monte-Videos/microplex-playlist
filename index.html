@@ -135,7 +135,7 @@
       max-height: 280px;
       overflow: auto;
     }
-    .folder-item {
+    .folder-item { 
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -155,13 +155,45 @@
       background: #bbdefb;
       color: #0d47a1;
     }
-    .folder-item-label {
+    .folder-item-info {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2em;
       flex: 1;
+      min-width: 0;
+    }
+    .folder-item-label {
       word-break: break-word;
     }
     .folder-item-meta {
       font-size: 0.75em;
       color: #607d8b;
+    }
+    .folder-item-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.25em;
+    }
+    .folder-item-add {
+      border: none;
+      background: #1e88e5;
+      color: #fff;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1em;
+      line-height: 1;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .folder-item-add:hover,
+    .folder-item-add:focus {
+      background: #1565c0;
+      color: #fff;
+      outline: none;
     }
     h2, h3 {
       margin: 0;
@@ -478,6 +510,7 @@
         audio: new Set(['mp3', 'wav', 'aif', 'aiff', 'flac', 'ogg', 'm4a']),
         image: new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'])
       };
+      const BROWSER_DRAG_TYPE = 'application/x-playlist-path';
 
       function fileUrlToPath(value) {
         if (!value || typeof value !== 'string') return value;
@@ -540,6 +573,32 @@
         return !/[/\\]/.test(value);
       }
 
+      function dataTransferHasBrowserPaths(dt) {
+        if (!dt) return false;
+        const types = Array.from(dt.types || []);
+        return types.includes(BROWSER_DRAG_TYPE);
+      }
+
+      function extractBrowserPaths(dt) {
+        if (!dataTransferHasBrowserPaths(dt)) {
+          return [];
+        }
+        try {
+          const raw = dt.getData(BROWSER_DRAG_TYPE);
+          if (!raw) {
+            return [];
+          }
+          const parsed = JSON.parse(raw);
+          if (!Array.isArray(parsed)) {
+            return [];
+          }
+          return parsed.map(value => cleanPath(value)).filter(Boolean);
+        } catch (err) {
+          console.warn('Failed to parse internal browser drag payload', err);
+          return [];
+        }
+      }
+
       function formatTime(seconds) {
         if (seconds == null || isNaN(seconds)) return '--:--';
         const h = Math.floor(seconds / 3600);
@@ -576,6 +635,21 @@
       function setConnStatus(msg, color = 'black') {
         connStatusEl.textContent = msg;
         connStatusEl.style.color = color;
+      }
+
+      function announcePlaylistAddition(paths) {
+        if (!Array.isArray(paths) || !paths.length) {
+          return;
+        }
+        if (paths.length === 1) {
+          const single = paths[0];
+          const label = window.mediaTools && typeof window.mediaTools.basename === 'function'
+            ? (window.mediaTools.basename(single) || single)
+            : single;
+          setStatus(`Added ${label} to the playlist.`);
+        } else {
+          setStatus(`Added ${paths.length} items to the playlist.`);
+        }
       }
 
       function clearSelectedBrowserItem() {
@@ -795,15 +869,52 @@
           item.dataset.type = entry.isDirectory ? 'directory' : 'file';
           item.tabIndex = 0;
 
+          const info = document.createElement('div');
+          info.className = 'folder-item-info';
+
           const label = document.createElement('span');
           label.className = 'folder-item-label';
           label.textContent = entry.name;
-          item.appendChild(label);
+          info.appendChild(label);
 
           const meta = document.createElement('span');
           meta.className = 'folder-item-meta';
           meta.textContent = entry.isDirectory ? 'Folder' : 'File';
-          item.appendChild(meta);
+          info.appendChild(meta);
+
+          item.appendChild(info);
+
+          if (!entry.isDirectory) {
+            const actions = document.createElement('div');
+            actions.className = 'folder-item-actions';
+
+            const addBtn = document.createElement('button');
+            addBtn.type = 'button';
+            addBtn.className = 'folder-item-add';
+            addBtn.setAttribute('aria-label', `Add ${entry.name} to the playlist`);
+            addBtn.textContent = '+';
+            addBtn.addEventListener('click', async event => {
+              event.stopPropagation();
+              const added = await addToPlaylist([entry.path]);
+              announcePlaylistAddition(added);
+            });
+            actions.appendChild(addBtn);
+
+            item.appendChild(actions);
+
+            item.draggable = true;
+            item.addEventListener('dragstart', event => {
+              if (!event.dataTransfer) return;
+              const payload = JSON.stringify([entry.path]);
+              event.dataTransfer.effectAllowed = 'copy';
+              event.dataTransfer.setData(BROWSER_DRAG_TYPE, payload);
+              selectBrowserItem(item);
+              playlistList.classList.add('dragover');
+            });
+            item.addEventListener('dragend', () => {
+              playlistList.classList.remove('dragover');
+            });
+          }
 
           item.__entry = entry;
 
@@ -812,25 +923,25 @@
             selectBrowserItem(item);
           });
 
-          item.addEventListener('dblclick', event => {
+          item.addEventListener('dblclick', async event => {
             event.stopPropagation();
             selectBrowserItem(item);
             if (entry.isDirectory) {
               populateFolderContents(rootPath, entry.path, container);
             } else {
-              addToPlaylist([entry.path]);
-              setStatus(`Added ${entry.name} to the playlist.`);
+              const added = await addToPlaylist([entry.path]);
+              announcePlaylistAddition(added);
             }
           });
 
-          item.addEventListener('keydown', event => {
+          item.addEventListener('keydown', async event => {
             if (event.key === 'Enter') {
               event.preventDefault();
               if (entry.isDirectory) {
                 populateFolderContents(rootPath, entry.path, container);
               } else {
-                addToPlaylist([entry.path]);
-                setStatus(`Added ${entry.name} to the playlist.`);
+                const added = await addToPlaylist([entry.path]);
+                announcePlaylistAddition(added);
               }
             }
           });
@@ -1034,14 +1145,18 @@
 
       async function addToPlaylist(paths, durationOverride, options = {}) {
         if (!Array.isArray(paths) || !paths.length) {
-          return;
+          return [];
         }
 
         const hasDurationHelper = window.mediaTools && typeof window.mediaTools.getDuration === 'function';
         const pendingUpdates = [];
+        const added = [];
+        let insertIndex = Number.isInteger(options.insertAt) ? Math.max(0, options.insertAt) : null;
         for (const path of paths) {
           const cleaned = cleanPath(path);
           if (!cleaned) continue;
+
+          added.push(cleaned);
 
           const displayName = cleaned.split(/[\\/]/).pop() || cleaned;
           const li = document.createElement('li');
@@ -1069,7 +1184,14 @@
           meta.appendChild(timesSpan);
           li.appendChild(label);
           li.appendChild(meta);
-          playlistList.appendChild(li);
+          if (insertIndex !== null) {
+            const clamped = Math.min(Math.max(insertIndex, 0), playlistList.children.length);
+            const reference = playlistList.children[clamped] || null;
+            playlistList.insertBefore(li, reference);
+            insertIndex = clamped + 1;
+          } else {
+            playlistList.appendChild(li);
+          }
 
           let duration = durationOverride !== undefined ? normalizeDuration(durationOverride) : null;
           if (duration !== null) {
@@ -1112,6 +1234,7 @@
             console.warn('duration update failed', err);
           }
         }
+        return added;
       }
 
       let dragSrcEl = null;
@@ -1132,6 +1255,13 @@
 
       function handleDragOver(e) {
         e.preventDefault();
+        if (dataTransferHasBrowserPaths(e.dataTransfer)) {
+          e.dataTransfer.dropEffect = 'copy';
+        } else if (dragSrcEl) {
+          e.dataTransfer.dropEffect = 'move';
+        } else if (e.dataTransfer) {
+          e.dataTransfer.dropEffect = 'none';
+        }
         return false;
       }
 
@@ -1150,18 +1280,41 @@
           return true;
         }
         if (dt.files && dt.files.length) return true;
-        const types = new Set(dt.types || []);
-        return types.has('Files') ||
-          types.has('public.file-url') ||
-          types.has('text/uri-list') ||
-          types.has('public.url') ||
-          types.has('com.apple.pasteboard.promised-file-url') ||
-          types.has('CorePasteboardFlavorType 0x75726C20') ||
-          types.has('NSFilenamesPboardType');
+        const types = Array.from(dt.types || []);
+        return types.includes('Files') ||
+          types.includes('public.file-url') ||
+          types.includes('text/uri-list') ||
+          types.includes('text/plain') ||
+          types.includes('public.url') ||
+          types.includes('public.utf8-plain-text') ||
+          types.includes('com.apple.pasteboard.promised-file-url') ||
+          types.includes('CorePasteboardFlavorType 0x75726C20') ||
+          types.includes('NSFilenamesPboardType');
       }
 
       async function handleDrop(e) {
         e.preventDefault();
+        e.stopPropagation();
+        this.classList.remove('over');
+        playlistList.classList.remove('dragover');
+
+        const browserPaths = extractBrowserPaths(e.dataTransfer);
+        if (browserPaths.length) {
+          const nodes = Array.from(playlistList.children);
+          let targetIndex = nodes.indexOf(this);
+          if (targetIndex !== -1) {
+            const rect = this.getBoundingClientRect();
+            if (e.clientY > rect.top + rect.height / 2) {
+              targetIndex += 1;
+            }
+          } else {
+            targetIndex = null;
+          }
+          const added = await addToPlaylist(browserPaths, undefined, { insertAt: targetIndex });
+          announcePlaylistAddition(added);
+          return false;
+        }
+
         const external = hasExternalPayload(e.dataTransfer);
         if (external) {
           await handleExternalDrop(e);
@@ -1341,23 +1494,68 @@
       }
 
       async function handleExternalDrop(e) {
+        if (dataTransferHasBrowserPaths(e.dataTransfer)) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
         e.preventDefault();
         e.stopPropagation();
         playlistList.classList.remove('dragover');
         setStatus('Finder drag-and-drop is temporarily disabled. Please use Pin Folder or Add Files…');
       }
 
+      async function handlePlaylistDrop(e) {
+        const browserPaths = extractBrowserPaths(e.dataTransfer);
+        if (browserPaths.length) {
+          e.preventDefault();
+          e.stopPropagation();
+          playlistList.classList.remove('dragover');
+          const added = await addToPlaylist(browserPaths);
+          announcePlaylistAddition(added);
+          return;
+        }
+        if (dragSrcEl) {
+          e.preventDefault();
+          e.stopPropagation();
+          playlistList.appendChild(dragSrcEl);
+          playlistList.classList.remove('dragover');
+          dragSrcEl = null;
+          updateStartEndTimes();
+          saveSettings();
+          return;
+        }
+        await handleExternalDrop(e);
+      }
+
       playlistList.addEventListener('dragover', e => {
-        e.preventDefault();
-        playlistList.classList.add('dragover');
-        setStatus('Finder drag-and-drop is temporarily disabled. Please use Pin Folder or Add Files…');
+        const hasBrowserData = dataTransferHasBrowserPaths(e.dataTransfer);
+        if (hasBrowserData || dragSrcEl) {
+          e.preventDefault();
+          playlistList.classList.add('dragover');
+          if (hasBrowserData && e.dataTransfer) {
+            e.dataTransfer.dropEffect = 'copy';
+          }
+          if (dragSrcEl && e.dataTransfer && !hasBrowserData) {
+            e.dataTransfer.dropEffect = 'move';
+          }
+        } else {
+          e.preventDefault();
+          playlistList.classList.add('dragover');
+          if (e.dataTransfer) {
+            e.dataTransfer.dropEffect = 'none';
+          }
+          setStatus('Finder drag-and-drop is temporarily disabled. Please use Pin Folder or Add Files…');
+        }
       });
 
-      playlistList.addEventListener('dragleave', () => {
-        playlistList.classList.remove('dragover');
+      playlistList.addEventListener('dragleave', event => {
+        if (!event.relatedTarget || !playlistList.contains(event.relatedTarget)) {
+          playlistList.classList.remove('dragover');
+        }
       });
 
-      playlistList.addEventListener('drop', handleExternalDrop);
+      playlistList.addEventListener('drop', handlePlaylistDrop);
 
       window.addEventListener('dragover', e => {
         e.preventDefault();
@@ -1494,9 +1692,22 @@
         }
         try {
           const folderPath = await window.mediaTools.selectFolder();
-          if (folderPath) {
-            await addPinnedFolder(folderPath);
+          if (!folderPath) {
+            setStatus('No folder selected.');
+            return;
           }
+          let resolvedPath = folderPath;
+          if (typeof window.mediaTools.normalizePaths === 'function') {
+            try {
+              const [normalized] = await window.mediaTools.normalizePaths([folderPath]);
+              if (normalized) {
+                resolvedPath = normalized;
+              }
+            } catch (err) {
+              console.warn('normalizePaths failed', err);
+            }
+          }
+          await addPinnedFolder(resolvedPath);
         } catch (err) {
           console.warn('selectFolder failed', err);
           setStatus('Unable to pin folder.');
