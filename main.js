@@ -39,14 +39,26 @@ ipcMain.handle('mediaTools:select-files', async () => {
   return filePaths;
 });
 
-ipcMain.handle('mediaTools:select-folder', async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog({
+ipcMain.handle('mediaTools:select-folder', async (event) => {
+  const browserWindow = BrowserWindow.fromWebContents(event.sender);
+  const options = {
     properties: ['openDirectory']
-  });
-  if (canceled || !Array.isArray(filePaths) || !filePaths.length) {
+  };
+
+  try {
+    const result = browserWindow
+      ? await dialog.showOpenDialog(browserWindow, options)
+      : await dialog.showOpenDialog(options);
+
+    const { canceled, filePaths } = result || {};
+    if (canceled || !Array.isArray(filePaths) || !filePaths.length) {
+      return null;
+    }
+    return filePaths[0];
+  } catch (err) {
+    console.warn('Failed to open folder picker dialog', err);
     return null;
   }
-  return filePaths[0];
 });
 
 ipcMain.handle('mediaTools:get-duration', async (_event, filePath) => {

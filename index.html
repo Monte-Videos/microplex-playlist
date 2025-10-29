@@ -1508,29 +1508,37 @@
         });
       });
 
+      function requestManualFolderPath(message = 'Enter a folder path to pin:') {
+        const manualPath = window.prompt(message);
+        if (manualPath && manualPath.trim().length) {
+          return manualPath.trim();
+        }
+        setStatus('Folder selection was canceled.');
+        return null;
+      }
+
       async function chooseFolderToPin() {
         if (window.mediaTools && typeof window.mediaTools.selectFolder === 'function') {
           try {
             const folderPath = await window.mediaTools.selectFolder();
-            if (!folderPath) {
+            if (typeof folderPath === 'string' && folderPath.trim().length) {
+              return folderPath;
+            }
+            if (folderPath === null) {
               setStatus('Folder selection was canceled.');
               return null;
             }
-            return folderPath;
+            setStatus('Folder picker did not return a usable path. Enter one manually.');
+            return requestManualFolderPath();
           } catch (err) {
             console.warn('selectFolder failed', err);
-            setStatus('Unable to pin folder.');
-            return null;
+            setStatus('Unable to open the folder picker. Enter a path manually instead.');
+            return requestManualFolderPath();
           }
         }
 
-        const manualPath = window.prompt('Enter a folder path to pin:');
-        if (manualPath && manualPath.trim().length) {
-          return manualPath.trim();
-        }
-
-        setStatus('Folder selection is unavailable in this environment.');
-        return null;
+        setStatus('Folder selection is unavailable in this environment. Enter a path manually.');
+        return requestManualFolderPath();
       }
 
       addFolderBtn.addEventListener('click', async () => {
