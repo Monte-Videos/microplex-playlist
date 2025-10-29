@@ -1,4 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const path = require('path');
+const { pathToFileURL } = require('url');
 
 contextBridge.exposeInMainWorld('mediaTools', {
   async selectFiles() {
@@ -10,6 +12,14 @@ contextBridge.exposeInMainWorld('mediaTools', {
       return [];
     }
   },
+  async selectFolder() {
+    try {
+      return await ipcRenderer.invoke('mediaTools:select-folder');
+    } catch (err) {
+      console.warn('selectFolder failed', err);
+      return null;
+    }
+  },
   getDuration(filePath) {
     return ipcRenderer.invoke('mediaTools:get-duration', filePath);
   },
@@ -18,5 +28,34 @@ contextBridge.exposeInMainWorld('mediaTools', {
   },
   loadData(key) {
     return ipcRenderer.invoke('mediaTools:load-data', key);
+  },
+  normalizePaths(values) {
+    return ipcRenderer.invoke('mediaTools:normalize-paths', values);
+  },
+  readDirectory(dirPath) {
+    return ipcRenderer.invoke('mediaTools:read-directory', dirPath);
+  },
+  basename(targetPath) {
+    if (typeof targetPath !== 'string') {
+      return '';
+    }
+    return path.basename(targetPath);
+  },
+  dirname(targetPath) {
+    if (typeof targetPath !== 'string') {
+      return '';
+    }
+    return path.dirname(targetPath);
+  },
+  toFileUrl(targetPath) {
+    if (typeof targetPath !== 'string') {
+      return '';
+    }
+    try {
+      return pathToFileURL(targetPath).toString();
+    } catch (err) {
+      console.warn('toFileUrl failed', err);
+      return '';
+    }
   }
 });
