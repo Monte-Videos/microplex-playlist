@@ -375,7 +375,7 @@
       <header class="section-header">
         <h3>Pinned Folders</h3>
         <div class="section-tools">
-          <button id="addFolderBtn" class="primary">Pin Folder…</button>
+          <button id="addFolderBtn" class="primary" type="button">Pin Folder…</button>
         </div>
       </header>
       <p class="helper-text">Browse frequently used folders, double-click files to add them to the playlist, and press the spacebar to preview supported media.</p>
@@ -938,11 +938,32 @@
         });
       }
 
-      async function addPinnedFolder(folderPath, options = {}) {
+      async function resolveFolderPath(folderPath) {
         if (!folderPath || typeof folderPath !== 'string') {
-          return;
+          return '';
         }
-        const normalized = folderPath.trim();
+
+        let candidate = folderPath.trim();
+        if (!candidate) {
+          return '';
+        }
+
+        if (window.mediaTools && typeof window.mediaTools.normalizePaths === 'function') {
+          try {
+            const normalized = await window.mediaTools.normalizePaths([candidate]);
+            if (Array.isArray(normalized) && normalized[0]) {
+              candidate = normalized[0];
+            }
+          } catch (err) {
+            console.warn('normalizePaths failed', err);
+          }
+        }
+
+        return candidate.trim();
+      }
+
+      async function addPinnedFolder(folderPath, options = {}) {
+        const normalized = await resolveFolderPath(folderPath);
         if (!normalized) {
           return;
         }
@@ -1487,20 +1508,38 @@
         });
       });
 
+      async function chooseFolderToPin() {
+        if (window.mediaTools && typeof window.mediaTools.selectFolder === 'function') {
+          try {
+            const folderPath = await window.mediaTools.selectFolder();
+            if (!folderPath) {
+              setStatus('Folder selection was canceled.');
+              return null;
+            }
+            return folderPath;
+          } catch (err) {
+            console.warn('selectFolder failed', err);
+            setStatus('Unable to pin folder.');
+            return null;
+          }
+        }
+
+        const manualPath = window.prompt('Enter a folder path to pin:');
+        if (manualPath && manualPath.trim().length) {
+          return manualPath.trim();
+        }
+
+        setStatus('Folder selection is unavailable in this environment.');
+        return null;
+      }
+
       addFolderBtn.addEventListener('click', async () => {
-        if (!window.mediaTools || typeof window.mediaTools.selectFolder !== 'function') {
-          setStatus('Folder selection is unavailable in this environment.');
+        const folderPath = await chooseFolderToPin();
+        if (!folderPath) {
           return;
         }
-        try {
-          const folderPath = await window.mediaTools.selectFolder();
-          if (folderPath) {
-            await addPinnedFolder(folderPath);
-          }
-        } catch (err) {
-          console.warn('selectFolder failed', err);
-          setStatus('Unable to pin folder.');
-        }
+
+        await addPinnedFolder(folderPath);
       });
 
       addFileBtn.addEventListener('click', async () => {
