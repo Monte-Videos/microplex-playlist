@@ -67,6 +67,57 @@ ipcMain.handle('mediaTools:get-duration', async (_event, filePath) => {
   });
 });
 
+ipcMain.handle('mediaTools:probe-media', async (_event, filePath) => {
+  if (!filePath) {
+    return null;
+  }
+
+  return new Promise((resolve) => {
+    ffmpeg.ffprobe(filePath, (err, data = {}) => {
+      if (err) {
+        resolve(null);
+        return;
+      }
+
+      const streams = Array.isArray(data.streams) ? data.streams : [];
+      const audioTracks = [];
+      const subtitleTracks = [];
+
+      streams.forEach((stream, idx) => {
+        if (!stream || !stream.codec_type) {
+          return;
+        }
+
+        const baseTrack = {
+          id: typeof stream.index === 'number' ? stream.index : idx,
+          codec: stream.codec_name || '',
+          channels: stream.channels,
+          channelLayout: stream.channel_layout || '',
+          language: (stream.tags?.language || stream.tags?.LANGUAGE || '').toLowerCase(),
+          title: stream.tags?.title || stream.tags?.handler_name || '',
+          default: !!(stream.disposition && stream.disposition.default),
+          forced: !!(stream.disposition && stream.disposition.forced)
+        };
+
+        if (stream.codec_type === 'audio') {
+          audioTracks.push(baseTrack);
+        } else if (stream.codec_type === 'subtitle') {
+          subtitleTracks.push(baseTrack);
+        }
+      });
+
+      const rawDuration = data?.format?.duration;
+      const numericDuration = typeof rawDuration === 'number' ? rawDuration : Number(rawDuration);
+
+      resolve({
+        duration: Number.isFinite(numericDuration) ? numericDuration : null,
+        audioTracks,
+        subtitleTracks
+      });
+    });
+  });
+});
+
 ipcMain.handle('mediaTools:save-data', (_event, key, value) => {
   if (!key) {
     return false;
