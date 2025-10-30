@@ -406,11 +406,8 @@
     <aside class="card sidebar">
       <header class="section-header">
         <h3>Pinned Folders</h3>
-        <div class="section-tools">
-          <button id="addFolderBtn" class="primary">Pin Folder…</button>
-        </div>
       </header>
-      <p class="helper-text">Browse frequently used folders, double-click files to add them to the playlist, and press the spacebar to preview supported media.</p>
+      <p class="helper-text">Browse the Microplex libraries, double-click files to add them to the playlist, and press the space bar to preview supported media.</p>
       <ul id="pinnedFolderList" class="pinned-folder-list"></ul>
       <p class="helper-text drop-disabled">Finder drag-and-drop is temporarily disabled while the file browser is in development.</p>
     </aside>
@@ -482,13 +479,12 @@
       const scheduleInput = document.getElementById('scheduleTime');
       const statusEl = document.getElementById('status');
       const connStatusEl = document.getElementById('connStatus');
-      const addFolderBtn = document.getElementById('addFolderBtn');
       const pinnedFolderList = document.getElementById('pinnedFolderList');
       const previewOverlay = document.getElementById('previewOverlay');
       const previewBody = document.getElementById('previewBody');
       const previewCloseBtn = document.getElementById('previewCloseBtn');
 
-      if (!wsUrlInput || !mediaSourceInput || !playlistList || !addFileBtn || !fileInput || !connectBtn || !playBtn || !streamBtn || !scheduleBtn || !scheduleInput || !statusEl || !connStatusEl || !addFolderBtn || !pinnedFolderList || !previewOverlay || !previewBody || !previewCloseBtn) {
+      if (!wsUrlInput || !mediaSourceInput || !playlistList || !addFileBtn || !fileInput || !connectBtn || !playBtn || !streamBtn || !scheduleBtn || !scheduleInput || !statusEl || !connStatusEl || !pinnedFolderList || !previewOverlay || !previewBody || !previewCloseBtn) {
         console.error('Playlist UI failed to initialize: missing required elements');
         return;
       }
@@ -501,7 +497,11 @@
       let requestCounter = 1;
       let poller = null;
       let scheduleTimeout = null;
-      const pinnedFolders = [];
+      const PINNED_FOLDERS = [
+        { label: 'MOVIES', path: '/Volumes/Multimedia/Movies' },
+        { label: 'TV', path: '/Volumes/Multimedia/TV' },
+        { label: 'MICROPLEX', path: '/Volumes/Multimedia/Microplex' }
+      ];
       const pinnedState = new Map();
       let selectedBrowserItem = null;
       const previewState = { isOpen: false };
@@ -950,17 +950,6 @@
         });
       }
 
-      async function savePinnedFolders() {
-        if (!window.mediaTools || typeof window.mediaTools.saveData !== 'function') {
-          return;
-        }
-        try {
-          await window.mediaTools.saveData('pinnedFolders', pinnedFolders);
-        } catch (err) {
-          console.warn('savePinnedFolders failed', err);
-        }
-      }
-
       function renderPinnedFolders() {
         if (!pinnedFolderList) {
           return;
@@ -968,16 +957,9 @@
         clearSelectedBrowserItem();
         pinnedFolderList.innerHTML = '';
 
-        if (!pinnedFolders.length) {
-          const empty = document.createElement('li');
-          empty.className = 'pinned-folder-empty';
-          empty.textContent = 'No folders pinned yet. Use “Pin Folder…” to get started.';
-          pinnedFolderList.appendChild(empty);
-          return;
-        }
-
-        pinnedFolders.forEach(folderPath => {
-          const state = pinnedState.get(folderPath) || { expanded: false, currentPath: folderPath };
+        PINNED_FOLDERS.forEach(folder => {
+          const folderPath = folder.path;
+          const state = pinnedState.get(folderPath) || { expanded: true, currentPath: folderPath };
           pinnedState.set(folderPath, state);
 
           const listItem = document.createElement('li');
@@ -996,9 +978,9 @@
           chevron.textContent = state.expanded ? '▾' : '▸';
           const title = document.createElement('span');
           title.className = 'pinned-folder-title';
-          title.textContent = window.mediaTools && typeof window.mediaTools.basename === 'function'
+          title.textContent = folder.label || (window.mediaTools && typeof window.mediaTools.basename === 'function'
             ? (window.mediaTools.basename(folderPath) || folderPath)
-            : folderPath;
+            : folderPath);
 
           toggleBtn.appendChild(chevron);
           toggleBtn.appendChild(title);
@@ -1020,15 +1002,6 @@
 
           header.appendChild(toggleBtn);
 
-          const removeBtn = document.createElement('button');
-          removeBtn.type = 'button';
-          removeBtn.textContent = 'Remove';
-          removeBtn.addEventListener('click', async event => {
-            event.stopPropagation();
-            await removePinnedFolder(folderPath);
-          });
-          header.appendChild(removeBtn);
-
           listItem.appendChild(header);
 
           const pathLabel = document.createElement('div');
@@ -1047,71 +1020,6 @@
 
           pinnedFolderList.appendChild(listItem);
         });
-      }
-
-      async function addPinnedFolder(folderPath, options = {}) {
-        if (!folderPath || typeof folderPath !== 'string') {
-          return;
-        }
-        const normalized = folderPath.trim();
-        if (!normalized) {
-          return;
-        }
-        if (pinnedFolders.includes(normalized)) {
-          if (!options.silent) {
-            setStatus('Folder is already pinned.');
-          }
-          return;
-        }
-        pinnedFolders.push(normalized);
-        pinnedState.set(normalized, { expanded: true, currentPath: normalized });
-        renderPinnedFolders();
-        await savePinnedFolders();
-        if (!options.silent) {
-          setStatus('Folder pinned.');
-        }
-      }
-
-      async function removePinnedFolder(folderPath) {
-        const idx = pinnedFolders.indexOf(folderPath);
-        if (idx === -1) {
-          return;
-        }
-        pinnedFolders.splice(idx, 1);
-        pinnedState.delete(folderPath);
-        if (selectedBrowserItem && selectedBrowserItem.entry) {
-          const entryPath = (selectedBrowserItem.entry.path || '').replace(/[\\/]+$/, '');
-          const normalizedFolder = folderPath.replace(/[\\/]+$/, '');
-          if (entryPath === normalizedFolder || entryPath.startsWith(`${normalizedFolder}/`) || entryPath.startsWith(`${normalizedFolder}\\`)) {
-            clearSelectedBrowserItem();
-          }
-        }
-        renderPinnedFolders();
-        await savePinnedFolders();
-        setStatus('Folder removed from pins.');
-      }
-
-      async function loadPinnedFolders() {
-        if (!window.mediaTools || typeof window.mediaTools.loadData !== 'function') {
-          renderPinnedFolders();
-          return;
-        }
-        try {
-          const stored = await window.mediaTools.loadData('pinnedFolders');
-          if (Array.isArray(stored)) {
-            const filtered = stored.filter(item => typeof item === 'string' && item.trim().length);
-            const unique = Array.from(new Set(filtered));
-            pinnedFolders.splice(0, pinnedFolders.length, ...unique);
-            pinnedFolders.forEach(pathValue => {
-              if (!pinnedState.has(pathValue)) {
-                pinnedState.set(pathValue, { expanded: false, currentPath: pathValue });
-              }
-            });
-          }
-        } catch (err) {
-          console.warn('loadPinnedFolders failed', err);
-        }
-        renderPinnedFolders();
       }
 
       function updateStartEndTimes() {
@@ -1685,35 +1593,6 @@
         });
       });
 
-      addFolderBtn.addEventListener('click', async () => {
-        if (!window.mediaTools || typeof window.mediaTools.selectFolder !== 'function') {
-          setStatus('Folder selection is unavailable in this environment.');
-          return;
-        }
-        try {
-          const folderPath = await window.mediaTools.selectFolder();
-          if (!folderPath) {
-            setStatus('No folder selected.');
-            return;
-          }
-          let resolvedPath = folderPath;
-          if (typeof window.mediaTools.normalizePaths === 'function') {
-            try {
-              const [normalized] = await window.mediaTools.normalizePaths([folderPath]);
-              if (normalized) {
-                resolvedPath = normalized;
-              }
-            } catch (err) {
-              console.warn('normalizePaths failed', err);
-            }
-          }
-          await addPinnedFolder(resolvedPath);
-        } catch (err) {
-          console.warn('selectFolder failed', err);
-          setStatus('Unable to pin folder.');
-        }
-      });
-
       addFileBtn.addEventListener('click', async () => {
         let selected = [];
 
@@ -1826,7 +1705,7 @@
         }
       }
 
-      loadPinnedFolders();
+      renderPinnedFolders();
       loadSettings();
     });
   </script>
