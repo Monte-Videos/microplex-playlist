@@ -23,6 +23,9 @@ contextBridge.exposeInMainWorld('mediaTools', {
   getDuration(filePath) {
     return ipcRenderer.invoke('mediaTools:get-duration', filePath);
   },
+  probeMedia(filePath) {
+    return ipcRenderer.invoke('mediaTools:probe-media', filePath);
+  },
   saveData(key, value) {
     return ipcRenderer.invoke('mediaTools:save-data', key, value);
   },

@@ -307,6 +307,33 @@
       font-size: 0.85em;
       color: #455a64;
     }
+    .entry-controls {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 0.75em;
+      font-size: 0.85em;
+      color: #455a64;
+      margin-top: 0.4em;
+    }
+    .track-field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25em;
+      min-width: 160px;
+    }
+    .track-select {
+      border: 1px solid #cfd8dc;
+      border-radius: 6px;
+      padding: 0.35em 0.5em;
+      font-size: 0.9em;
+      color: #1b1f23;
+      background: #fff;
+    }
+    .track-status {
+      font-style: italic;
+      color: #78909c;
+    }
     .entry-length {
       font-weight: 600;
     }
@@ -490,7 +517,7 @@
       }
 
       let ws = null;
-      let playlist = [];
+      let playlistEntries = [];
       let currentIndex = 0;
       let playing = false;
       let mediaSource = mediaSourceInput.value.trim();
@@ -510,6 +537,7 @@
         audio: new Set(['mp3', 'wav', 'aif', 'aiff', 'flac', 'ogg', 'm4a']),
         image: new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'])
       };
+      const DEFAULT_SUBTITLE_VALUE = 'none';
       const BROWSER_DRAG_TYPE = 'application/x-playlist-path';
 
       function fileUrlToPath(value) {
@@ -607,14 +635,31 @@
         return (h > 0 ? h + ':' : '') + (m < 10 && h > 0 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
       }
 
-      function getPlaylist() {
-        return Array.from(playlistList.querySelectorAll('li')).map(li => cleanPath(li.dataset.path));
+      function collectPlaylistEntries() {
+        return Array.from(playlistList.querySelectorAll('li')).map(li => {
+          const pathValue = cleanPath(li.dataset.path);
+          if (!pathValue) {
+            return null;
+          }
+          return {
+            path: pathValue,
+            duration: Number(li.dataset.duration ?? 0),
+            audioTrack: li.dataset.audioTrack ?? '',
+            subtitleTrack: li.dataset.subtitleTrack ?? DEFAULT_SUBTITLE_VALUE
+          };
+        }).filter(Boolean);
+      }
+
+      function getPlaylistEntries() {
+        return collectPlaylistEntries();
       }
 
       function getPlaylistData() {
-        return Array.from(playlistList.querySelectorAll('li')).map(li => ({
-          path: li.dataset.path,
-          duration: Number(li.dataset.duration ?? 0)
+        return collectPlaylistEntries().map(entry => ({
+          path: entry.path,
+          duration: entry.duration,
+          audioTrack: entry.audioTrack,
+          subtitleTrack: entry.subtitleTrack
         }));
       }
 
@@ -626,6 +671,46 @@
         if (value === undefined || value === null) return null;
         const numeric = typeof value === 'number' ? value : Number(value);
         return Number.isFinite(numeric) ? numeric : null;
+      }
+
+      function isEnglishLanguage(code) {
+        if (!code) return false;
+        const normalized = code.toLowerCase();
+        return normalized === 'en' || normalized === 'eng' || normalized.startsWith('en-') || normalized === 'english';
+      }
+
+      function describeTrack(track, type) {
+        if (!track) return '';
+        const parts = [];
+        const language = (track.language || '').trim();
+        if (language) {
+          parts.push(language.toUpperCase());
+        }
+        if (track.title) {
+          parts.push(track.title);
+        }
+        if (type === 'audio') {
+          if (track.channels) {
+            if (track.channels === 2) {
+              parts.push('Stereo');
+            } else if (track.channels === 6) {
+              parts.push('5.1');
+            } else if (track.channels === 8) {
+              parts.push('7.1');
+            } else {
+              parts.push(`${track.channels}ch`);
+            }
+          }
+        } else if (type === 'subtitle' && track.forced) {
+          parts.push('Forced');
+        }
+        if (track.default) {
+          parts.push('Default');
+        }
+        if (track.codec) {
+          parts.push(track.codec.toUpperCase());
+        }
+        return parts.length ? parts.join(' · ') : `Track ${track.id}`;
       }
 
       function setStatus(msg) {
@@ -1051,24 +1136,246 @@
         }
       }
 
+      async function initializeTrackControls(li, filePath, { presetTracks } = {}) {
+        if (!li) {
+          return null;
+        }
+
+        let controls = li.querySelector('.entry-controls');
+        if (!controls) {
+          controls = document.createElement('div');
+          controls.className = 'entry-controls';
+          li.appendChild(controls);
+        } else {
+          controls.innerHTML = '';
+        }
+
+        const status = document.createElement('span');
+        status.className = 'track-status';
+        status.textContent = 'Scanning tracks…';
+        controls.appendChild(status);
+
+        if (!window.mediaTools || typeof window.mediaTools.probeMedia !== 'function') {
+          status.textContent = 'Track info unavailable.';
+          return null;
+        }
+
+        try {
+          const info = await window.mediaTools.probeMedia(filePath);
+          if (!info) {
+            status.textContent = 'Track info unavailable.';
+            return null;
+          }
+
+          const audioTracks = Array.isArray(info.audioTracks) ? info.audioTracks : [];
+          const subtitleTracks = Array.isArray(info.subtitleTracks) ? info.subtitleTracks : [];
+          controls.innerHTML = '';
+
+          const presetAudioValue = presetTracks && presetTracks.audio !== undefined && presetTracks.audio !== null && presetTracks.audio !== ''
+            ? String(presetTracks.audio)
+            : null;
+          const presetSubtitleValue = presetTracks && presetTracks.subtitle !== undefined && presetTracks.subtitle !== null && presetTracks.subtitle !== ''
+            ? String(presetTracks.subtitle)
+            : null;
+
+          let audioDefault = '';
+          if (audioTracks.length) {
+            const englishAudio = audioTracks.find(track => isEnglishLanguage(track.language));
+            const flaggedAudio = audioTracks.find(track => track.default);
+            const fallbackAudio = englishAudio || flaggedAudio || audioTracks[0];
+            if (presetAudioValue && audioTracks.some(track => String(track.id) === presetAudioValue)) {
+              audioDefault = presetAudioValue;
+            } else if (fallbackAudio) {
+              audioDefault = String(fallbackAudio.id);
+            }
+          }
+          li.dataset.audioTrack = audioDefault;
+
+          const audioField = document.createElement('label');
+          audioField.className = 'track-field';
+          audioField.textContent = 'Audio Track';
+          const audioSelect = document.createElement('select');
+          audioSelect.className = 'track-select';
+
+          const audioAutoOption = document.createElement('option');
+          audioAutoOption.value = '';
+          audioAutoOption.textContent = 'Use source default';
+          audioSelect.appendChild(audioAutoOption);
+
+          if (audioTracks.length) {
+            audioTracks.forEach(track => {
+              const option = document.createElement('option');
+              option.value = String(track.id);
+              option.textContent = describeTrack(track, 'audio');
+              audioSelect.appendChild(option);
+            });
+          } else {
+            const option = document.createElement('option');
+            option.disabled = true;
+            option.value = '';
+            option.textContent = 'No audio tracks detected';
+            audioSelect.appendChild(option);
+          }
+
+          audioSelect.value = audioDefault;
+          audioField.appendChild(audioSelect);
+          controls.appendChild(audioField);
+
+          audioSelect.addEventListener('change', () => {
+            li.dataset.audioTrack = audioSelect.value || '';
+            saveSettings();
+          });
+
+          const subtitleField = document.createElement('label');
+          subtitleField.className = 'track-field';
+          subtitleField.textContent = 'Subtitles';
+          const subtitleSelect = document.createElement('select');
+          subtitleSelect.className = 'track-select';
+
+          const noneOption = document.createElement('option');
+          noneOption.value = DEFAULT_SUBTITLE_VALUE;
+          noneOption.textContent = 'No subtitles';
+          subtitleSelect.appendChild(noneOption);
+
+          if (subtitleTracks.length) {
+            subtitleTracks.forEach(track => {
+              const option = document.createElement('option');
+              option.value = String(track.id);
+              option.textContent = describeTrack(track, 'subtitle');
+              subtitleSelect.appendChild(option);
+            });
+          } else {
+            const option = document.createElement('option');
+            option.disabled = true;
+            option.value = DEFAULT_SUBTITLE_VALUE;
+            option.textContent = 'No subtitle tracks detected';
+            subtitleSelect.appendChild(option);
+          }
+
+          let subtitleDefault = DEFAULT_SUBTITLE_VALUE;
+          if (presetSubtitleValue && subtitleTracks.some(track => String(track.id) === presetSubtitleValue)) {
+            subtitleDefault = presetSubtitleValue;
+          }
+          subtitleSelect.value = subtitleDefault;
+          li.dataset.subtitleTrack = subtitleDefault;
+
+          subtitleField.appendChild(subtitleSelect);
+          controls.appendChild(subtitleField);
+
+          subtitleSelect.addEventListener('change', () => {
+            li.dataset.subtitleTrack = subtitleSelect.value || DEFAULT_SUBTITLE_VALUE;
+            saveSettings();
+          });
+
+          return info;
+        } catch (err) {
+          status.textContent = 'Track scan failed.';
+          console.warn('probeMedia failed', err);
+          return null;
+        }
+      }
+
+      function buildInputSettings(entry) {
+        const playlistItem = {
+          value: entry.path,
+          hidden: false,
+          selected: true
+        };
+
+        const settings = {
+          local_file: entry.path,
+          playlist: [playlistItem],
+          loop: false,
+          shuffle: false
+        };
+
+        const audioValue = entry.audioTrack;
+        if (audioValue !== undefined && audioValue !== null && audioValue !== '') {
+          const audioNumber = Number(audioValue);
+          if (Number.isFinite(audioNumber)) {
+            settings.audioTrack = audioNumber;
+            settings.audio_track = audioNumber;
+            playlistItem.audioTrack = audioNumber;
+            playlistItem.audio_track = audioNumber;
+          }
+        }
+
+        const subtitleValue = entry.subtitleTrack;
+        if (subtitleValue && subtitleValue !== DEFAULT_SUBTITLE_VALUE) {
+          const subtitleNumber = Number(subtitleValue);
+          if (Number.isFinite(subtitleNumber)) {
+            settings.subtitleTrack = subtitleNumber;
+            settings.subtitle_track = subtitleNumber;
+            settings.subtitleEnable = true;
+            settings.enableSubtitles = true;
+            settings.subtitle_enable = true;
+            settings.subtitles_enable = true;
+            playlistItem.subtitleTrack = subtitleNumber;
+            playlistItem.subtitle_track = subtitleNumber;
+          }
+        } else {
+          settings.subtitleTrack = -1;
+          settings.subtitle_track = -1;
+          settings.subtitleEnable = false;
+          settings.enableSubtitles = false;
+          settings.subtitle_enable = false;
+          settings.subtitles_enable = false;
+        }
+
+        return settings;
+      }
+
       async function addToPlaylist(paths, durationOverride, options = {}) {
         if (!Array.isArray(paths) || !paths.length) {
+          return [];
+        }
+
+        let cleanedPaths = paths.map(path => cleanPath(path)).filter(Boolean);
+        if (!cleanedPaths.length) {
+          return [];
+        }
+
+        const needsNormalization = cleanedPaths.some(value => !isLikelyAbsolute(value));
+        const originalPaths = cleanedPaths.slice();
+        if (needsNormalization && window.mediaTools && typeof window.mediaTools.normalizePaths === 'function') {
+          try {
+            const resolved = await window.mediaTools.normalizePaths(originalPaths);
+            if (Array.isArray(resolved) && resolved.length) {
+              cleanedPaths = resolved.map((value, idx) => {
+                const fallback = originalPaths[idx];
+                if (typeof value === 'string' && value.trim()) {
+                  return cleanPath(value);
+                }
+                return fallback;
+              }).filter(Boolean);
+            }
+          } catch (err) {
+            console.warn('normalizePaths failed', err);
+          }
+        }
+
+        cleanedPaths = Array.from(new Set(cleanedPaths)).map(value => cleanPath(value)).filter(isLikelyAbsolute);
+
+        if (!cleanedPaths.length) {
+          setStatus('Unable to resolve file paths. Please use the pinned folders or Add Files… button.');
           return [];
         }
 
         const hasDurationHelper = window.mediaTools && typeof window.mediaTools.getDuration === 'function';
         const pendingUpdates = [];
         const added = [];
+        const presetTracksArray = Array.isArray(options.presetTracks) ? options.presetTracks : null;
+        let presetIndex = 0;
         let insertIndex = Number.isInteger(options.insertAt) ? Math.max(0, options.insertAt) : null;
-        for (const path of paths) {
-          const cleaned = cleanPath(path);
-          if (!cleaned) continue;
 
-          added.push(cleaned);
+        for (const cleaned of cleanedPaths) {
+          if (!cleaned) continue;
 
           const displayName = cleaned.split(/[\\/]/).pop() || cleaned;
           const li = document.createElement('li');
           li.dataset.path = cleaned;
+          li.dataset.audioTrack = '';
+          li.dataset.subtitleTrack = DEFAULT_SUBTITLE_VALUE;
           li.draggable = true;
 
           attachDragHandlers(li);
@@ -1092,6 +1399,7 @@
           meta.appendChild(timesSpan);
           li.appendChild(label);
           li.appendChild(meta);
+
           if (insertIndex !== null) {
             const clamped = Math.min(Math.max(insertIndex, 0), playlistList.children.length);
             const reference = playlistList.children[clamped] || null;
@@ -1101,47 +1409,120 @@
             playlistList.appendChild(li);
           }
 
+          const presetTracks = presetTracksArray ? presetTracksArray[presetIndex++] : options.presetTracks;
+          if (presetTracks && typeof presetTracks === 'object') {
+            if (presetTracks.audio !== undefined && presetTracks.audio !== null && presetTracks.audio !== '') {
+              li.dataset.audioTrack = String(presetTracks.audio);
+            }
+            if (presetTracks.subtitle !== undefined && presetTracks.subtitle !== null && presetTracks.subtitle !== '') {
+              li.dataset.subtitleTrack = String(presetTracks.subtitle);
+            } else {
+              li.dataset.subtitleTrack = DEFAULT_SUBTITLE_VALUE;
+            }
+          }
+
+          let durationSet = false;
           let duration = durationOverride !== undefined ? normalizeDuration(durationOverride) : null;
           if (duration !== null) {
             li.dataset.duration = duration;
             lengthSpan.textContent = `Length: ${formatTime(duration)}`;
+            durationSet = true;
           } else {
             li.dataset.duration = 0;
-            if (hasDurationHelper) {
-              const resolveDuration = window.mediaTools.getDuration(cleaned)
-                .then(result => {
-                  const normalized = normalizeDuration(result);
+          }
+
+          const extension = (displayName.split('.').pop() || '').toLowerCase();
+          if (extension === 'mkv') {
+            const trackPromise = initializeTrackControls(li, cleaned, { presetTracks })
+              .then(async info => {
+                let updated = false;
+                if (info) {
+                  const normalized = normalizeDuration(info.duration);
                   if (normalized !== null) {
                     li.dataset.duration = normalized;
                     lengthSpan.textContent = `Length: ${formatTime(normalized)}`;
+                    durationSet = true;
+                    updated = true;
                   }
-                })
-                .catch(err => {
-                  console.warn('getDuration failed', err);
-                })
-                .finally(() => {
-                  updateStartEndTimes();
-                  if (!options.skipSave) {
-                    saveSettings();
+                }
+                if (!updated && hasDurationHelper) {
+                  try {
+                    const result = await window.mediaTools.getDuration(cleaned);
+                    const normalized = normalizeDuration(result);
+                    if (normalized !== null) {
+                      li.dataset.duration = normalized;
+                      lengthSpan.textContent = `Length: ${formatTime(normalized)}`;
+                      durationSet = true;
+                      updated = true;
+                    }
+                  } catch (err) {
+                    console.warn('getDuration failed', err);
                   }
-                });
-              pendingUpdates.push(resolveDuration);
+                }
+                updateStartEndTimes();
+              })
+              .catch(err => {
+                console.warn('probeMedia failed', err);
+                if (hasDurationHelper) {
+                  return window.mediaTools.getDuration(cleaned)
+                    .then(result => {
+                      const normalized = normalizeDuration(result);
+                      if (normalized !== null) {
+                        li.dataset.duration = normalized;
+                        lengthSpan.textContent = `Length: ${formatTime(normalized)}`;
+                        durationSet = true;
+                      }
+                    })
+                    .catch(err2 => {
+                      console.warn('getDuration failed', err2);
+                    })
+                    .finally(() => {
+                      updateStartEndTimes();
+                    });
+                }
+                updateStartEndTimes();
+                return null;
+              });
+            if (trackPromise) {
+              pendingUpdates.push(trackPromise);
             }
+          } else if (!durationSet && hasDurationHelper) {
+            const resolveDuration = window.mediaTools.getDuration(cleaned)
+              .then(result => {
+                const normalized = normalizeDuration(result);
+                if (normalized !== null) {
+                  li.dataset.duration = normalized;
+                  lengthSpan.textContent = `Length: ${formatTime(normalized)}`;
+                }
+              })
+              .catch(err => {
+                console.warn('getDuration failed', err);
+              })
+              .finally(() => {
+                updateStartEndTimes();
+              });
+            pendingUpdates.push(resolveDuration);
           }
+
+          added.push(cleaned);
         }
 
         updateStartEndTimes();
-        if (!options.skipSave) {
-          saveSettings();
-        }
 
         if (pendingUpdates.length) {
           try {
             await Promise.allSettled(pendingUpdates);
           } catch (err) {
-            console.warn('duration update failed', err);
+            console.warn('async playlist update failed', err);
+          } finally {
+            updateStartEndTimes();
           }
         }
+
+        if (!options.skipSave) {
+          await saveSettings();
+        }
+
         return added;
       }
 
@@ -1517,20 +1898,27 @@
       }
 
       function playIndex(idx) {
-        playlist = getPlaylist();
+        playlistEntries = getPlaylistEntries();
         mediaSource = getMediaSource();
         if (poller) clearInterval(poller);
-        if (idx >= playlist.length) {
+        if (idx >= playlistEntries.length) {
           setStatus('Done!');
           playing = false;
           return;
         }
         currentIndex = idx;
-        const file = playlist[idx];
+        const entry = playlistEntries[idx];
+        if (!entry || !entry.path) {
+          setStatus('Skipping playlist entry with no path.');
+          playNext();
+          return;
+        }
+        const file = entry.path;
         setStatus(`Playing: ${file}`);
+        const inputSettings = buildInputSettings(entry);
         sendRequest('SetInputSettings', {
           inputName: mediaSource,
-          inputSettings: { local_file: file },
+          inputSettings,
           overlay: false
         }, () => {
           setTimeout(() => {
@@ -1574,8 +1962,8 @@
           setStatus('Not connected to OBS WebSocket.');
           return;
         }
-        playlist = getPlaylist();
-        if (!playlist.length) {
+        playlistEntries = getPlaylistEntries();
+        if (!playlistEntries.length) {
           setStatus('Playlist is empty.');
           return;
         }
@@ -1605,7 +1993,7 @@
         }
 
         if (selected && selected.length) {
-          addToPlaylist(selected);
+          await addToPlaylist(selected);
           return;
         }
 
@@ -1613,10 +2001,10 @@
         fileInput.click();
       });
 
-      fileInput.addEventListener('change', () => {
+      fileInput.addEventListener('change', async () => {
         const files = Array.from(fileInput.files || []);
         const paths = files.map(file => file.path || file.name).filter(Boolean);
-        addToPlaylist(paths);
+        await addToPlaylist(paths);
         fileInput.value = '';
       });
 
@@ -1695,7 +2083,16 @@
           if (Array.isArray(playlistData)) {
             playlistList.innerHTML = '';
             for (const item of playlistData) {
-              await addToPlaylist([item.path], item.duration, { skipSave: true });
+              if (!item || !item.path) {
+                continue;
+              }
+              const presetTracks = typeof item === 'object'
+                ? {
+                    audio: item.audioTrack ?? item.audio ?? '',
+                    subtitle: item.subtitleTrack ?? item.subtitle ?? DEFAULT_SUBTITLE_VALUE
+                  }
+                : undefined;
+              await addToPlaylist([item.path], item.duration, { skipSave: true, presetTracks });
             }
           }
 
